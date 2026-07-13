@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { GamebullInventorySource, EmptyInventorySource, connectPredictorRedis } from './inventory/gamebull.js';
 import type { InventorySource } from './inventory/types.js';
 import { DryRunVenue } from './venue/dry-run.js';
+import { BinanceDemoVenue } from './venue/binance-demo.js';
 import type { ExecutionVenue } from './venue/types.js';
 import { Gate } from './core/gate.js';
 import { Hedger } from './core/hedger.js';
@@ -52,11 +53,20 @@ async function main() {
   // ── execution venue ───────────────────────────────────────────────────────
   let venue: ExecutionVenue;
   if (config.executionVenue === 'binance-demo') {
-    throw new Error('binance-demo venue lands in Phase 2 — set EXECUTION_VENUE=dry-run for now');
+    const bv = new BinanceDemoVenue({ apiKey: config.apiKey, apiSecret: config.apiSecret, futuresBase: config.futuresBase, symbol: config.symbol });
+    if (!bv.hasKeys()) console.warn('[hedging] binance-demo has NO keys — observe-only (no orders will place)');
+    await bv.prepare(config.leverage, config.multiAssets); // leverage + multi-assets margin
+    // flatten any orphan position from a prior run before trading
+    const orphan = bv.hasKeys() ? await bv.getPositionUnits().catch(() => 0) : 0;
+    if (Math.abs(orphan) > 0) {
+      console.log(`[hedging] flattening orphan position ${orphan} BTC on startup`);
+      await bv.marketOrder(orphan > 0 ? 'SELL' : 'BUY', Math.abs(orphan), true).catch((e) => console.error('[hedging] orphan flatten failed:', String(e).slice(0, 80)));
+    }
+    venue = bv;
   } else {
     venue = new DryRunVenue();
+    if (venue.setLeverage) await venue.setLeverage(config.leverage).catch(() => {});
   }
-  if (venue.setLeverage) await venue.setLeverage(config.leverage).catch(() => {});
 
   // ── gate + hedger + loop ──────────────────────────────────────────────────
   const gate = new Gate({

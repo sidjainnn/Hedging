@@ -18,11 +18,13 @@ Phased path from a booting skeleton to a staging-deployable service. Status is k
 - **Verified:** live house short-YES 95 → `aggregateDelta +0.31` → gate armed → hedger LONG 0.159 BTC
   (clamped to the $10k cap); expired markets skipped. Direction correct (short YES → LONG).
 
-## Phase 2 — Binance demo execution venue
-- Implement `binance-demo` venue from amm-hedging's `binance.ts` (position, filters, market
-  order, leverage). Mainnet hosts throw at construction.
-- Reduce-only, deadband, startup reconcile.
-- **Done when:** with demo keys, the hedge position tracks the aggregate δ on the testnet.
+## Phase 2 — Binance demo execution venue  ✅
+- `binance-demo` venue ported from amm-hedging's `binance.ts` (mark, position, filters, market
+  order w/ fill-price lookup, leverage, multi-assets). Mainnet re-asserted at construction.
+- Startup orphan-flatten; reduce-only + deadband inherited from the hedger.
+- **Verified:** mainnet host REFUSES to start; observe-only boot with no keys (key-gated).
+  Live testnet fills need demo `BINANCE_API_KEY`/`SECRET` in `.env` (user-provided) — code path
+  is complete and key-gated.
 
 ## Phase 3 — Control plane + kill-switch
 - `/metrics` (Prometheus), `POST /config` (runtime gate tuning), `POST /kill` (flatten + disable).

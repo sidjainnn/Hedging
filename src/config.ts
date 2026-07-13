@@ -49,6 +49,8 @@ export const config = {
   // assertPaper runs even in dry-run so a misconfigured prod host fails loudly.
   futuresBase: assertPaper(env.FUTURES_BASE ?? 'https://demo-fapi.binance.com', 'FUTURES_BASE'),
   leverage: parseInt(env.HEDGE_LEVERAGE ?? '1', 10),
+  // Multi-Assets Mode ON so USDC + USDT together back the BTCUSDT hedge.
+  multiAssets: bool(env.MULTI_ASSETS_MARGIN, true),
 
   // ── risk gate (mirrors amm-hedging) ───────────────────────────────────────
   hedgeEnabled: bool(env.HEDGE_ENABLED, false),
