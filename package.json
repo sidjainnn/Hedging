@@ -1,0 +1,23 @@
+{
+  "name": "gb-crypto-hedging-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only perp-hedging sidecar for GameBull's crypto (feed-3) LMSR markets.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "selftest": "tsx src/selftest.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "@types/node": "^22.5.0"
+  }
+}
