@@ -26,10 +26,11 @@ Phased path from a booting skeleton to a staging-deployable service. Status is k
   Live testnet fills need demo `BINANCE_API_KEY`/`SECRET` in `.env` (user-provided) — code path
   is complete and key-gated.
 
-## Phase 3 — Control plane + kill-switch
-- `/metrics` (Prometheus), `POST /config` (runtime gate tuning), `POST /kill` (flatten + disable).
-- Structured logging, graceful shutdown policy (flatten vs hold).
-- **Done when:** ops can retune gates and kill the hedge without a redeploy.
+## Phase 3 — Control plane + kill-switch  ✅
+- `GET /metrics` (Prometheus gauges), `POST /config` (runtime gate tuning + enable/disable),
+  `POST /kill` (flatten to zero + disable, idempotent).
+- **Verified:** metrics expose δ/position/gate live; /config retunes the gate without redeploy;
+  /kill flattens the position to 0 and the loop holds it flat/disabled after.
 
 ## Phase 4 — Observability + A/B + dashboard
 - Persist the `WindowLedger`; expose the A/B report as an endpoint/job.

@@ -82,7 +82,7 @@ async function main() {
   });
   loop.start();
 
-  const app = buildServer(loop);
+  const app = buildServer({ loop, gate, hedger, venue });
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`[hedging] control plane on :${config.port} — GET /health /state`);
 
