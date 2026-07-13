@@ -9,12 +9,14 @@ import type { Loop } from '../loop.js';
 import type { Gate, GateOpts } from '../core/gate.js';
 import type { Hedger } from '../core/hedger.js';
 import type { ExecutionVenue } from '../venue/types.js';
+import type { ServiceLedger } from '../core/ledger.js';
 
 export interface ControlDeps {
   loop: Loop;
   gate: Gate;
   hedger: Hedger;
   venue: ExecutionVenue;
+  ledger?: ServiceLedger;
 }
 
 // best mark available: last loop spot, else the venue mark.
@@ -66,6 +68,14 @@ export function buildServer(deps: ControlDeps) {
   });
 
   app.get('/state', async () => loop.state);
+
+  // per-window hedge ledger + summary (Phase 4)
+  app.get('/ledger', async (req) => {
+    const limit = Number((req.query as { limit?: string })?.limit ?? 50);
+    return { csv: deps.ledger?.csvPath() ?? null, rows: deps.ledger?.rows(limit) ?? [] };
+  });
+
+  app.get('/report', async () => deps.ledger?.report() ?? { windows: 0 });
 
   app.get('/metrics', async (_req, reply) => {
     reply.header('Content-Type', 'text/plain; version=0.0.4');

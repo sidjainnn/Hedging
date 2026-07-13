@@ -32,10 +32,17 @@ Phased path from a booting skeleton to a staging-deployable service. Status is k
 - **Verified:** metrics expose δ/position/gate live; /config retunes the gate without redeploy;
   /kill flattens the position to 0 and the loop holds it flat/disabled after.
 
-## Phase 4 — Observability + A/B + dashboard
-- Persist the `WindowLedger`; expose the A/B report as an endpoint/job.
-- Point the `gb-crypto-local` dashboard hedge panel at this service's `/state`.
-- **Done when:** hedged-vs-unhedged accounting is visible live and exportable.
+## Phase 4 — Observability + ledger + dashboard  ✅
+- `core/ledger.ts` — per-window (clock-aligned, `LEDGER_WINDOW_MS`, default 5min) hedge-side
+  ledger: hedge P&L, fees, fills, slippage, exposure mean/max, armed frac, position close.
+  CSV-persisted (`data/ledger.csv`), preloaded on boot. `GET /ledger` + `GET /report`.
+- `gb-crypto-local` dashboard hedge panel now reads THIS service's `/state` (source of truth;
+  falls back to inline estimate if the service is down).
+- **Verified:** windows roll + persist; `/report` summarizes; dashboard shows the live service
+  position/gate/δ/P&L.
+- **Follow-up (analytics):** the full hedged-vs-unhedged BOOK A/B needs a join of this hedge
+  ledger with the exchange's per-window settlement P&L (distribution engine) — a separate job,
+  since the service only owns the hedge side.
 
 ## Phase 5 — Productionization
 - Container hardening, secrets management, staging deploy next to GameBull QA.

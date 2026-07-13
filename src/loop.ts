@@ -6,6 +6,7 @@ import type { ExecutionVenue } from './venue/types.js';
 import { DryRunVenue } from './venue/dry-run.js';
 import { Gate, type GateStatus } from './core/gate.js';
 import { Hedger } from './core/hedger.js';
+import type { ServiceLedger } from './core/ledger.js';
 
 export interface LoopDeps {
   inventory: InventorySource;
@@ -16,6 +17,7 @@ export interface LoopDeps {
   intervalSec: number;
   volWindow: number;
   minSigmaPerSec: number;
+  ledger?: ServiceLedger;
 }
 
 export interface LoopState {
@@ -83,6 +85,15 @@ export class Loop {
         const target = gate.armed ? inv.aggregateDelta : 0;
         if (gate.armed) await d.hedger.reconcile(target, spot);
         else await d.hedger.flatten(spot);
+
+        d.ledger?.tick({
+          now: Date.now(), armed: gate.armed, notionalUsdt: inv.notionalUsdt,
+          realizedVol: volPerTick, position: d.hedger.livePosition,
+          cum: {
+            hedgePnl: d.hedger.hedgePnl(spot), feesPaid: d.hedger.feesPaid, fillCount: d.hedger.fillCount,
+            notionalTraded: d.hedger.notionalTraded, slippagePaid: d.hedger.slippagePaid,
+          },
+        });
       }
 
       this.state = {

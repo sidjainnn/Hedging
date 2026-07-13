@@ -8,6 +8,7 @@ import type { ExecutionVenue } from './venue/types.js';
 import { Gate } from './core/gate.js';
 import { Hedger } from './core/hedger.js';
 import { Loop } from './loop.js';
+import { ServiceLedger } from './core/ledger.js';
 import { buildServer } from './http/server.js';
 
 async function main() {
@@ -75,14 +76,15 @@ async function main() {
   });
   const hedger = new Hedger(venue, { maxNotionalUsdt: config.maxNotionalUsdt, deadbandUsdt: config.hedgeDeadbandUsdt }, config.hedgeEnabled);
 
+  const ledger = new ServiceLedger(config.ledgerWindowMs);
   const loop = new Loop({
     inventory, venue, gate, hedger, getSpot,
     intervalSec: config.hedgeIntervalSec, volWindow: config.hedgeVolWindow,
-    minSigmaPerSec: config.minSigmaPerSec,
+    minSigmaPerSec: config.minSigmaPerSec, ledger,
   });
   loop.start();
 
-  const app = buildServer({ loop, gate, hedger, venue });
+  const app = buildServer({ loop, gate, hedger, venue, ledger });
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`[hedging] control plane on :${config.port} — GET /health /state`);
 

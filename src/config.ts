@@ -31,6 +31,8 @@ export const config = {
   // Live 1s BTC realized vol sits ~4e-5, so floor there. Only affects the delta
   // math, NOT the vol GATE (which still sees raw realized vol).
   minSigmaPerSec: parseFloat(env.MIN_SIGMA_PER_SEC ?? '0.00004'),
+  // Ledger window (ms). Default 5min = the markets' tenor; lower it for testing.
+  ledgerWindowMs: parseInt(env.LEDGER_WINDOW_MS ?? '300000', 10),
 
   // ── inventory source (read-only) ──────────────────────────────────────────
   inventorySource: (env.INVENTORY_SOURCE ?? 'gamebull') as 'gamebull' | 'empty',
