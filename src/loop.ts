@@ -15,6 +15,7 @@ export interface LoopDeps {
   getSpot: () => Promise<number | null>;
   intervalSec: number;
   volWindow: number;
+  minSigmaPerSec: number;
 }
 
 export interface LoopState {
@@ -65,8 +66,10 @@ export class Loop {
         if (this.prices.length > d.volWindow) this.prices.shift();
       }
       const volPerTick = this.realizedVol();
-      // per-second vol for the digital delta (returns are sampled every intervalSec).
-      const sigmaPerSec = volPerTick / Math.sqrt(Math.max(d.intervalSec, 1));
+      // per-second vol for the digital delta (returns are sampled every intervalSec),
+      // floored so cold vol history doesn't degenerate dp/dS. The vol GATE below
+      // still sees the raw per-tick vol.
+      const sigmaPerSec = Math.max(volPerTick / Math.sqrt(Math.max(d.intervalSec, 1)), d.minSigmaPerSec);
 
       let inv: AggregateInventory | null = null;
       let gate: GateStatus | null = null;

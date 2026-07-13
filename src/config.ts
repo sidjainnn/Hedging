@@ -26,6 +26,11 @@ export const config = {
   port: parseInt(env.PORT ?? '8790', 10),
   symbol: (env.SYMBOL ?? 'BTCUSDT').toUpperCase(),
   hedgeIntervalSec: parseInt(env.HEDGE_INTERVAL_SEC ?? '10', 10),
+  // Floor on the per-second vol used for the digital delta. Cold vol history
+  // (few samples) gives σ≈0, which degenerates dp/dS (→0 off-strike, →∞ at-strike).
+  // Live 1s BTC realized vol sits ~4e-5, so floor there. Only affects the delta
+  // math, NOT the vol GATE (which still sees raw realized vol).
+  minSigmaPerSec: parseFloat(env.MIN_SIGMA_PER_SEC ?? '0.00004'),
 
   // ── inventory source (read-only) ──────────────────────────────────────────
   inventorySource: (env.INVENTORY_SOURCE ?? 'gamebull') as 'gamebull' | 'empty',

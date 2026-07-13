@@ -10,11 +10,13 @@ Phased path from a booting skeleton to a staging-deployable service. Status is k
 - **Done when:** service runs, polls inventory (empty ok), reports gate status, dry-run venue
   logs intended orders.
 
-## Phase 1 — Inventory ingestion from the real stack
-- `inventory-mirror` driver in `gb-crypto-local`: `bb_pending_bids` → `MMP_LMSR_QUANTITY_*`.
-- Wire `GamebullInventorySource` to the local predictor Redis; spot from `CRYPTO_SPOT_BTCUSDT`.
-- Realized-vol estimation from the spot stream.
-- **Done when:** `/state` shows non-zero `aggregateDelta` driven by real matched house inventory.
+## Phase 1 — Inventory ingestion from the real stack  ✅
+- `inventory-mirror` driver in `gb-crypto-local`: `bb_pending_bids` house matched → `MMP_LMSR_QUANTITY_*`
+  (sign mapping `qYes=houseNo, qNo=houseYes` so the hedge OFFSETS, not doubles — see the driver header).
+- `GamebullInventorySource` wired to the local predictor Redis; spot from `CRYPTO_SPOT_BTCUSDT`.
+- Realized-vol from the spot stream, with `MIN_SIGMA_PER_SEC` floor (cold-start guard — the known gotcha, resolved).
+- **Verified:** live house short-YES 95 → `aggregateDelta +0.31` → gate armed → hedger LONG 0.159 BTC
+  (clamped to the $10k cap); expired markets skipped. Direction correct (short YES → LONG).
 
 ## Phase 2 — Binance demo execution venue
 - Implement `binance-demo` venue from amm-hedging's `binance.ts` (position, filters, market

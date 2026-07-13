@@ -68,6 +68,7 @@ async function main() {
   const loop = new Loop({
     inventory, venue, gate, hedger, getSpot,
     intervalSec: config.hedgeIntervalSec, volWindow: config.hedgeVolWindow,
+    minSigmaPerSec: config.minSigmaPerSec,
   });
   loop.start();
 
