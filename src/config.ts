@@ -65,6 +65,11 @@ export const config = {
   hedgeNotionalUsdt: parseFloat(env.HEDGE_NOTIONAL_USDT ?? '80'),
   maxNotionalUsdt: parseFloat(env.MAX_NOTIONAL_USDT ?? '10000'),
   hedgeDeadbandUsdt: parseFloat(env.HEDGE_DEADBAND_USDT ?? '75'),
+  // On SIGTERM/SIGINT: flatten the position (leave no unmonitored perp) or hold it
+  // (keep the book hedged across a restart). Default HOLD — a brief restart
+  // shouldn't churn the hedge; set true for environments where an unwatched
+  // position is the bigger risk.
+  flattenOnShutdown: bool(env.FLATTEN_ON_SHUTDOWN, false),
 
   hasKeys(): boolean {
     return this.apiKey.length > 0 && this.apiSecret.length > 0;

@@ -46,22 +46,29 @@ export class ServiceLedger {
   private exposureMax = 0;
   private volSum = 0;
   private base: HedgerCumulative | null = null; // cumulatives at window open
+  private persist = true; // false ⇒ memory-only (read-only FS)
 
-  constructor(windowMs = 5 * 60_000, dataDir = 'data') {
+  constructor(windowMs = 5 * 60_000, dataDir = process.env.DATA_DIR ?? 'data') {
     this.windowMs = windowMs;
-    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
     this.csv = path.join(dataDir, 'ledger.csv');
-    if (existsSync(this.csv)) {
-      // preload existing rows into memory (skip header)
-      const lines = readFileSync(this.csv, 'utf8').trim().split('\n').slice(1);
-      for (const l of lines) {
-        const v = l.split(',');
-        const row = {} as LedgerRow;
-        LEDGER_COLUMNS.forEach((c, i) => (row[c] = i <= 1 ? (v[i] ?? '') : Number(v[i] ?? 0)));
-        this.rowsMem.push(row);
+    // Disk persistence is best-effort: on a read-only / non-writable FS the ledger
+    // still runs (in memory), it just won't survive a restart.
+    try {
+      if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+      if (existsSync(this.csv)) {
+        const lines = readFileSync(this.csv, 'utf8').trim().split('\n').slice(1);
+        for (const l of lines) {
+          const v = l.split(',');
+          const row = {} as LedgerRow;
+          LEDGER_COLUMNS.forEach((c, i) => (row[c] = i <= 1 ? (v[i] ?? '') : Number(v[i] ?? 0)));
+          this.rowsMem.push(row);
+        }
+      } else {
+        appendFileSync(this.csv, LEDGER_COLUMNS.join(',') + '\n');
       }
-    } else {
-      appendFileSync(this.csv, LEDGER_COLUMNS.join(',') + '\n');
+    } catch (e) {
+      this.persist = false;
+      console.warn(`[ledger] disk unavailable (${String(e).slice(0, 60)}) — running memory-only`);
     }
   }
 
@@ -113,9 +120,11 @@ export class ServiceLedger {
       position_close: +t.position.toFixed(6),
     };
     this.rowsMem.push(row);
-    try {
-      appendFileSync(this.csv, LEDGER_COLUMNS.map((c) => row[c]).join(',') + '\n');
-    } catch { /* disk unavailable — keep in memory */ }
+    if (this.persist) {
+      try {
+        appendFileSync(this.csv, LEDGER_COLUMNS.map((c) => row[c]).join(',') + '\n');
+      } catch { /* disk went away — keep in memory */ }
+    }
   }
 
   rows(limit = 50): LedgerRow[] {

@@ -1,0 +1,19 @@
+# Staging/local run of the hedging service. Point PREDICTOR_REDIS_HOST at the
+# stack's Redis (GameBull QA or the gb-crypto-local docker network). Secrets come
+# from .env at runtime — NEVER baked into the image.
+services:
+  hedging:
+    build: .
+    image: gb-crypto-hedging-service:latest
+    env_file: .env
+    environment:
+      # in-container defaults; override in .env
+      PORT: 8790
+      PREDICTOR_REDIS_HOST: ${PREDICTOR_REDIS_HOST:-host.docker.internal}
+      PREDICTOR_REDIS_PORT: ${PREDICTOR_REDIS_PORT:-6379}
+    ports:
+      - "8790:8790"
+    restart: unless-stopped
+    # reach a Redis running on the host (macOS/Windows). On Linux, use the stack network instead.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

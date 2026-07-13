@@ -91,6 +91,15 @@ async function main() {
   const shutdown = async () => {
     console.log('[hedging] shutting down…');
     loop.stop();
+    if (config.flattenOnShutdown) {
+      const mark = loop.state.spot ?? (await venue.getMarkPrice().catch(() => 0));
+      if (mark > 0) {
+        console.log('[hedging] FLATTEN_ON_SHUTDOWN — closing position');
+        await hedger.flatten(mark).catch((e) => console.error('[hedging] shutdown flatten failed:', String(e).slice(0, 80)));
+      }
+    } else if (Math.abs(hedger.livePosition) > 0) {
+      console.log(`[hedging] holding position ${hedger.livePosition} BTC across shutdown (FLATTEN_ON_SHUTDOWN=false)`);
+    }
     await app.close();
     process.exit(0);
   };

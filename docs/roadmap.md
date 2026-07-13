@@ -44,11 +44,16 @@ Phased path from a booting skeleton to a staging-deployable service. Status is k
   ledger with the exchange's per-window settlement P&L (distribution engine) — a separate job,
   since the service only owns the hedge side.
 
-## Phase 5 — Productionization
-- Container hardening, secrets management, staging deploy next to GameBull QA.
-- Platform ask (already known): publish `MMP_MARKET_META` for feed-3 markets.
-- Runbook, alerts, on-call kill-switch.
-- **Done when:** running in staging against QA inventory with alerting.
+## Phase 5 — Productionization  ✅ (deploy artifacts)
+- `Dockerfile` (node:22-slim, non-root, `/health` HEALTHCHECK, tsx runtime) + `.dockerignore`
+  + `docker-compose.yml` (points at stack Redis; secrets via `.env` at runtime, never in image).
+- `FLATTEN_ON_SHUTDOWN` policy (hold vs close position across restarts).
+- `ops/alerts.yml` — Prometheus rules (down, hedger error, loop stalled, position over cap,
+  stale spot, armed-but-no-inventory).
+- `docs/deploy.md` — build/run, secrets, health, staging checklist, the platform ask.
+- **Verified:** image builds; container boots + `/health` green.
+- **Remaining (env-specific, needs infra access):** actual staging deploy next to GameBull QA
+  (QA Redis creds + demo keys), scrape wiring, and the platform `MMP_MARKET_META` publish.
 
 ## Out of scope (tracked elsewhere)
 - Options overlay for terminal gamma — see amm-hedging `options-hedging-idea`.

@@ -53,6 +53,7 @@ with `INVENTORY_SOURCE=empty` it boots and reports an idle loop with no dependen
 - [docs/execution-venue.md](docs/execution-venue.md) — the venue interface + demo→prod swap.
 - [docs/security.md](docs/security.md) — mainnet block, secrets, read-only guarantees.
 - [docs/ops-runbook.md](docs/ops-runbook.md) — control plane, kill-switch, alerts.
+- [docs/deploy.md](docs/deploy.md) — Docker/compose, secrets, staging checklist, platform ask.
 
 ## Relationship to the other repos
 - `~/Desktop/amm-hedging` — source of the hedging logic + the A/B validation. Reference only.

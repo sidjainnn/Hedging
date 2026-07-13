@@ -1,0 +1,50 @@
+# Prometheus alerting rules for gb-crypto-hedging-service (scrape GET /metrics).
+# Load via prometheus.yml rule_files. Tune thresholds per environment.
+groups:
+  - name: hedging-service
+    rules:
+      - alert: HedgingServiceDown
+        expr: up{job="hedging-service"} == 0 or absent(hedging_up)
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hedging service is down / not scraping"
+
+      - alert: HedgerError
+        expr: hedging_has_error == 1
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hedger reporting an error (venue/API) for >2m"
+
+      - alert: LoopStalled
+        # tick counter hasn't advanced in 2m — the control loop is wedged
+        expr: increase(hedging_tick[2m]) == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hedge loop stalled (no ticks in 2m)"
+
+      - alert: PositionOverCap
+        # live hedge notional exceeds the configured budget (should never happen — clamp)
+        expr: abs(hedging_position_units * hedging_spot) > 12000
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Hedge position notional over cap"
+
+      - alert: SpotStale
+        # spot hasn't changed in 3m — feed likely stale, delta/mark untrustworthy
+        expr: stddev_over_time(hedging_spot[3m]) == 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Spot feed appears stale (no movement in 3m)"
+
+      - alert: ArmedButNoInventory
+        # armed for a while with zero exposure — likely a mirror/inventory fault
+        expr: hedging_gate_armed == 1 and hedging_notional_usdt == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Gate armed but exposure is zero (inventory feed fault?)"
