@@ -40,6 +40,17 @@ traceability, entry/exit criteria).
 ## What is NOT covered — needs their real QA or more work (do not assume safe)
 Being explicit so nobody mistakes green for "flawless":
 
+0. **CRITICAL — inventory contract mismatch (unresolved).** Verified against the REAL
+   `feat/lmsr` matcher + trading-api: `MMP_LMSR_QUANTITY_YES/NO_{marketId}` is written as
+   `incrby(key, bidCount × bidAmount)` — a **cumulative notional value** (count × price),
+   **increment-only**, per the bid's own option, for USER bids. Our adapter assumes it is a
+   **net share quantity** and computes `(qYes−qNo)·dp/dS`. These do not match (units: value vs
+   shares; net vs cumulative; the real LMSR *pricing* state is a separate `market.quantityYes/No`).
+   Our local tests passed only because our mirror wrote the keys in our own assumed format
+   (circular). **Do not trust the hedge on real data until this is reconciled** with
+   `market-match-maker` `lmsrHelper.getLMSRPrice` semantics + confirmed with the team.
+   Also: we integrated locally against matcher branch `PRE`, which lacks the LMSR code entirely;
+   the real code is on `feat/lmsr`/`QA`.
 1. **Real order flow.** All inventory is synthetic (our drivers). Real user behavior, bid
    sizes, and skew distributions are unknown → the gate calibration and hedge magnitude are
    only validated on our model, not production flow.

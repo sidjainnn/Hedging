@@ -51,6 +51,15 @@ production problem, but it means those tests aren't a safety net; I wrote our ow
    options overlay as a later phase?
 3. **Scope of first deploy:** read-only observe mode in QA first (no orders), then demo-perp.
 
+### 0. Blocker to confirm FIRST — LMSR inventory semantics
+Reading the real `feat/lmsr` code, `MMP_LMSR_QUANTITY_YES/NO_{marketId}` is incremented by
+`bidCount × bidAmount` (a cumulative **value**, increment-only, user bids), while the LMSR
+**price** is driven by a separate `market.quantityYes/quantityNo`. My hedger currently treats
+`MMP_LMSR_QUANTITY_*` as **net share inventory**. **Which Redis value represents the house's net
+YES/NO exposure I should hedge?** If it's `market.quantityYes/quantityNo` (or another key), point
+me at it and confirm units (shares vs value) and whether it's net/current vs cumulative. This
+determines the hedge sign and size — everything else is downstream of it.
+
 ### B. One platform change
 4. **Publish `MMP_MARKET_META_{marketId}`** for `feedId=3` markets — a small JSON blob
    `{ underlyingSymbol, strike, expiryTs, feedId }` in predictor Redis. It's the only thing the
