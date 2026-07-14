@@ -10,6 +10,7 @@ import { DryRunVenue } from './venue/dry-run.js';
 
 const now = Date.now();
 const store: Record<string, string> = {
+  'predictor_active_markets': '', // set membership handled by the stub below
   'MMP_LMSR_QUANTITY_YES_m1': '0',
   'MMP_LMSR_QUANTITY_NO_m1': '5000', // house short YES 5000 (took the other side of user YES flow)
   'MMP_MARKET_META_m1': JSON.stringify({ underlyingSymbol: 'BTCUSDT', strike: 63000, expiryTs: now + 300_000, feedId: 3 }),
@@ -17,9 +18,10 @@ const store: Record<string, string> = {
   'MMP_LMSR_QUANTITY_YES_s9': '100',
   'MMP_MARKET_META_s9': JSON.stringify({ underlyingSymbol: 'BTCUSDT', strike: 1, expiryTs: now + 300_000, feedId: 1 }),
 };
+const activeMarkets = ['m1', 's9'];
 const redis: RedisLike = {
   get: async (k) => store[k] ?? null,
-  keys: async (p) => Object.keys(store).filter((k) => k.startsWith(p.replace(/\*$/, ''))),
+  smembers: async (k) => (k === 'predictor_active_markets' ? activeMarkets : []),
 };
 
 const SPOT = 63000;
@@ -27,7 +29,7 @@ const SIGMA_PER_SEC = 0.0004;
 
 async function main() {
   const inv = new GamebullInventorySource(redis, {
-    symbol: 'BTCUSDT', hedgeableFeedIds: [3],
+    symbol: 'BTCUSDT', hedgeableFeedIds: [3], activeMarketsKey: 'predictor_active_markets',
     keyYes: 'MMP_LMSR_QUANTITY_YES_', keyNo: 'MMP_LMSR_QUANTITY_NO_', keyMeta: 'MMP_MARKET_META_',
   });
   const agg = await inv.poll(SPOT, SIGMA_PER_SEC, now);

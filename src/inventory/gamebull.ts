@@ -10,9 +10,17 @@ import type { AggregateInventory, HedgeableMarket, InventorySource, MarketMeta, 
 export interface GamebullSourceOpts {
   symbol: string; // hedge symbol, e.g. 'BTCUSDT' — only markets on this underlying
   hedgeableFeedIds: number[]; // e.g. [3] (non-sports)
+  activeMarketsKey: string; // e.g. 'predictor_active_markets' (the live-market index)
   keyYes: string;
   keyNo: string;
   keyMeta: string;
+}
+
+// A finite, safe number or 0 — guards against NaN/Infinity from a malformed key
+// poisoning the aggregate (which would silently disable OR blow up the hedge).
+function safeNum(raw: string | null): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export class GamebullInventorySource implements InventorySource {
@@ -21,14 +29,14 @@ export class GamebullInventorySource implements InventorySource {
 
   async poll(spot: number, sigmaPerSec: number, nowTs: number): Promise<AggregateInventory> {
     const o = this.opts;
-    // discover active LMSR markets from the YES-quantity keys (no separate index).
-    const yesKeys = await this.redis.keys(`${o.keyYes}*`);
+    // Read the active-market index (O(active markets), non-blocking) rather than a
+    // KEYS scan of the whole keyspace. This is the only Redis-set read we do.
+    const marketIds = await this.redis.smembers(o.activeMarketsKey);
     const markets: HedgeableMarket[] = [];
     let aggregateDelta = 0;
     let skipped = 0;
 
-    for (const yk of yesKeys) {
-      const marketId = yk.slice(o.keyYes.length);
+    for (const marketId of marketIds) {
       const meta = await this.readMeta(marketId);
       if (!meta || !o.hedgeableFeedIds.includes(meta.feedId) || meta.underlyingSymbol !== o.symbol) {
         skipped++;
@@ -39,10 +47,14 @@ export class GamebullInventorySource implements InventorySource {
         skipped++;
         continue;
       }
-      const qYes = Number(await this.redis.get(yk)) || 0;
-      const qNo = Number(await this.redis.get(`${o.keyNo}${marketId}`)) || 0;
+      const qYes = safeNum(await this.redis.get(`${o.keyYes}${marketId}`));
+      const qNo = safeNum(await this.redis.get(`${o.keyNo}${marketId}`));
       const { dpdS } = digitalProb(spot, meta.strike, sigmaPerSec, tauSec);
       const delta = (qYes - qNo) * dpdS;
+      if (!Number.isFinite(delta)) {
+        skipped++;
+        continue;
+      }
       aggregateDelta += delta;
       markets.push({ marketId, underlyingSymbol: meta.underlyingSymbol, strike: meta.strike, expiryTs: meta.expiryTs, qYes, qNo, delta });
     }
@@ -81,7 +93,7 @@ export async function connectPredictorRedis(host: string, port: number): Promise
   const r = new Redis({ host, port, maxRetriesPerRequest: 1, lazyConnect: false });
   return {
     get: (k: string) => r.get(k),
-    keys: (p: string) => r.keys(p),
+    smembers: (k: string) => r.smembers(k),
     getRaw: (k: string) => r.get(k),
   };
 }

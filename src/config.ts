@@ -39,6 +39,7 @@ export const config = {
   predictorRedisHost: env.PREDICTOR_REDIS_HOST ?? '127.0.0.1',
   predictorRedisPort: parseInt(env.PREDICTOR_REDIS_PORT ?? '6379', 10),
   hedgeableFeedIds: (env.HEDGEABLE_FEED_IDS ?? '3').split(',').map((s) => parseInt(s.trim(), 10)),
+  activeMarketsKey: env.ACTIVE_MARKETS_KEY ?? 'predictor_active_markets',
   lmsrKeyYes: env.MMP_LMSR_KEY_YES ?? 'MMP_LMSR_QUANTITY_YES_',
   lmsrKeyNo: env.MMP_LMSR_KEY_NO ?? 'MMP_LMSR_QUANTITY_NO_',
   lmsrKeyMeta: env.MMP_MARKET_META_KEY ?? 'MMP_MARKET_META_',

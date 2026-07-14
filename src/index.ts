@@ -29,6 +29,7 @@ async function main() {
     if (redis) {
       inventory = new GamebullInventorySource(redis, {
         symbol: config.symbol, hedgeableFeedIds: config.hedgeableFeedIds,
+        activeMarketsKey: config.activeMarketsKey,
         keyYes: config.lmsrKeyYes, keyNo: config.lmsrKeyNo, keyMeta: config.lmsrKeyMeta,
       });
       const r = redis;

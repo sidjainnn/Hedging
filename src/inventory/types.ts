@@ -6,9 +6,14 @@
 // Minimal Redis surface we depend on — dependency-injected so the adapter is
 // unit-testable against an in-memory stub (no infra) and wired to real ioredis
 // only at runtime.
+//
+// NOTE: we deliberately expose `smembers` (read the active-markets index) and NOT
+// `keys`. Redis KEYS is O(N) over the whole keyspace and BLOCKS the server — on a
+// shared production Redis with millions of keys that freezes every service each
+// poll. Reading the active-markets set is O(active markets) and non-blocking.
 export interface RedisLike {
   get(key: string): Promise<string | null>;
-  keys(pattern: string): Promise<string[]>;
+  smembers(key: string): Promise<string[]>;
 }
 
 export interface MarketMeta {

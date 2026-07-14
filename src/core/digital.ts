@@ -21,11 +21,17 @@ export interface Digital {
 
 // sigmaPerSec = per-second vol, tauSec = seconds to expiry.
 export function digitalProb(spot: number, strike: number, sigmaPerSec: number, tauSec: number): Digital {
+  // Degenerate inputs (no valid price/strike) have no computable delta — return a
+  // neutral p and ZERO delta rather than NaN/Infinity, so a bad feed can never
+  // poison the aggregate or size a garbage hedge.
+  if (!(spot > 0) || !(strike > 0) || !Number.isFinite(spot) || !Number.isFinite(strike)) {
+    return { p: 0.5, dpdS: 0 };
+  }
   const tau = Math.max(tauSec, 1e-9);
   const vol = Math.max(sigmaPerSec, 1e-12);
   const denom = vol * Math.sqrt(tau);
   const d = (Math.log(spot / strike) - 0.5 * vol * vol * tau) / denom;
   const p = Math.min(0.999999, Math.max(1e-6, normCdf(d)));
   const dpdS = normPdf(d) / (spot * denom);
-  return { p, dpdS };
+  return { p, dpdS: Number.isFinite(dpdS) ? dpdS : 0 };
 }

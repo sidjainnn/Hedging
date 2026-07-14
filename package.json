@@ -8,6 +8,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "selftest": "tsx src/selftest.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "qa": "bash scripts/qa.sh",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
