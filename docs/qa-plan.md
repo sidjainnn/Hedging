@@ -40,17 +40,19 @@ traceability, entry/exit criteria).
 ## What is NOT covered — needs their real QA or more work (do not assume safe)
 Being explicit so nobody mistakes green for "flawless":
 
-0. **CRITICAL — inventory contract mismatch (unresolved).** Verified against the REAL
-   `feat/lmsr` matcher + trading-api: `MMP_LMSR_QUANTITY_YES/NO_{marketId}` is written as
-   `incrby(key, bidCount × bidAmount)` — a **cumulative notional value** (count × price),
-   **increment-only**, per the bid's own option, for USER bids. Our adapter assumes it is a
-   **net share quantity** and computes `(qYes−qNo)·dp/dS`. These do not match (units: value vs
-   shares; net vs cumulative; the real LMSR *pricing* state is a separate `market.quantityYes/No`).
-   Our local tests passed only because our mirror wrote the keys in our own assumed format
-   (circular). **Do not trust the hedge on real data until this is reconciled** with
-   `market-match-maker` `lmsrHelper.getLMSRPrice` semantics + confirmed with the team.
-   Also: we integrated locally against matcher branch `PRE`, which lacks the LMSR code entirely;
-   the real code is on `feat/lmsr`/`QA`.
+0. **Inventory source CONFIRMED; scaling/interpretation open.** Verified against the REAL
+   `feat/lmsr` code: `MMP_LMSR_QUANTITY_YES/NO_{marketId}` ARE the LMSR pricing state — the price
+   is `calcLMSRPrice(get(qYes), get(qNo))` (`market-match-maker/src/utils/lmsrHelper.js`). So our
+   adapter reads the RIGHT keys and `(qYes−qNo)·dp/dS` is the correct SHAPE (matches the MM's
+   settlement-value delta; sign/direction correct). THREE open questions affect hedge SIZE, not
+   direction: (a) **units** — `q` is `Σ bidCount×bidAmount` = notional cents (bidAmount is price,
+   5–95¢), and `b=volatility=500` is calibrated to that scale; confirm the correct share-vs-notional
+   scaling. (b) **cumulative** — nothing decrements these keys in any feat/lmsr repo (no sell path),
+   so `q` is cumulative over the market life, ≈ net only if no intra-window sells. (c) **seed** —
+   `initializeLMSRQuantities` pre-loads `q` with `startOption1Q/2Q` (synthetic liquidity, not real
+   risk) → likely subtract before hedging. NOTE: we integrated locally against matcher branch `PRE`,
+   which LACKS the LMSR code; the real code is `feat/lmsr`/`QA`. Confirm (a)/(b)/(c) with the team
+   before trusting hedge magnitude on real data.
 1. **Real order flow.** All inventory is synthetic (our drivers). Real user behavior, bid
    sizes, and skew distributions are unknown → the gate calibration and hedge magnitude are
    only validated on our model, not production flow.
