@@ -18,7 +18,10 @@ Real defects, not hypotheticals — each would surface at scale/production:
    the hedge. **Fixed:** `digitalProb` guards degenerate inputs → 0 delta; adapter drops
    non-finite deltas + `safeNum` on quantities. Tests: `digital` grid, `inventory` SAFETY.
 
-## What IS covered (25 adversarial tests)
+See `docs/qa-environment.md` for the full test strategy (levels, environments, techniques,
+traceability, entry/exit criteria).
+
+## What IS covered (30 adversarial tests)
 - **digital** — output finite & `p∈[0,1]` across a degenerate grid (spot 0/huge, σ 0/huge,
   τ negative/0/huge); near-expiry ATM doesn't blow to Infinity.
 - **inventory** — SIGN (short YES→LONG, short NO→SHORT, offsets); NETTING across markets;
@@ -30,6 +33,8 @@ Real defects, not hypotheticals — each would surface at scale/production:
   on closes, flatten reaches zero, disabled/no-keys observe-only, **exact & correctly-signed
   P&L**, finite over 2000 reconciles.
 - **ledger** — windows roll on clock boundaries, correct diffs, read-only-FS → memory-only.
+- **boundary** — boundary-value analysis: gate arm (=100), disarm (=60), deadband (=75),
+  expiry (τ=0 vs 1ms), market counts (0/1/2/many) tested AT and on both sides of each threshold.
 - **selftest** — full inventory→gate→hedger→venue wiring, plus a live check against the stack.
 
 ## What is NOT covered — needs their real QA or more work (do not assume safe)
