@@ -44,6 +44,12 @@ export const config = {
   lmsrKeyNo: env.MMP_LMSR_KEY_NO ?? 'MMP_LMSR_QUANTITY_NO_',
   lmsrKeyMeta: env.MMP_MARKET_META_KEY ?? 'MMP_MARKET_META_',
   spotRedisKey: env.SPOT_REDIS_KEY ?? 'CRYPTO_SPOT_BTCUSDT',
+  // Spot feed source: 'ws' = the service's own Binance WebSocket (real-time,
+  // self-sufficient — default); 'redis' = read CRYPTO_SPOT_* from Redis (fed by
+  // an external oracle-feed, e.g. the local stack).
+  spotSource: (env.SPOT_SOURCE ?? 'ws') as 'ws' | 'redis',
+  binanceWsBase: env.BINANCE_WS_BASE ?? 'wss://stream.binance.com:9443',
+  feedStaleMs: parseInt(env.FEED_STALE_MS ?? '15000', 10),
 
   // ── execution venue ───────────────────────────────────────────────────────
   executionVenue: (env.EXECUTION_VENUE ?? 'dry-run') as 'dry-run' | 'binance-demo',

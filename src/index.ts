@@ -9,46 +9,52 @@ import { Gate } from './core/gate.js';
 import { Hedger } from './core/hedger.js';
 import { Loop } from './loop.js';
 import { ServiceLedger } from './core/ledger.js';
+import { BinanceWsSpotFeed } from './feed/binance-ws.js';
 import { buildServer } from './http/server.js';
 
 async function main() {
   console.log(`[hedging] starting · symbol=${config.symbol} venue=${config.executionVenue} inventory=${config.inventorySource} interval=${config.hedgeIntervalSec}s`);
 
-  // ── inventory source + spot feed ──────────────────────────────────────────
+  // ── inventory source ──────────────────────────────────────────────────────
   let inventory: InventorySource;
-  let getSpot: () => Promise<number | null>;
-
+  let redis: Awaited<ReturnType<typeof connectPredictorRedis>> | null = null;
   if (config.inventorySource === 'gamebull') {
-    let redis: Awaited<ReturnType<typeof connectPredictorRedis>> | null = null;
     try {
       redis = await connectPredictorRedis(config.predictorRedisHost, config.predictorRedisPort);
       console.log(`[hedging] predictor Redis connected ${config.predictorRedisHost}:${config.predictorRedisPort}`);
     } catch (e) {
       console.error(`[hedging] Redis connect failed (${String(e).slice(0, 60)}) — running with EMPTY inventory`);
     }
-    if (redis) {
-      inventory = new GamebullInventorySource(redis, {
-        symbol: config.symbol, hedgeableFeedIds: config.hedgeableFeedIds,
-        activeMarketsKey: config.activeMarketsKey,
-        keyYes: config.lmsrKeyYes, keyNo: config.lmsrKeyNo, keyMeta: config.lmsrKeyMeta,
-      });
-      const r = redis;
-      getSpot = async () => {
-        try {
-          const raw = await r.getRaw(config.spotRedisKey);
-          if (!raw) return null;
-          const v = JSON.parse(raw);
-          return typeof v?.price === 'number' ? v.price : (typeof v === 'number' ? v : null);
-        } catch {
-          return null;
-        }
-      };
-    } else {
-      inventory = new EmptyInventorySource();
-      getSpot = async () => null;
-    }
+    inventory = redis
+      ? new GamebullInventorySource(redis, {
+          symbol: config.symbol, hedgeableFeedIds: config.hedgeableFeedIds, activeMarketsKey: config.activeMarketsKey,
+          keyYes: config.lmsrKeyYes, keyNo: config.lmsrKeyNo, keyMeta: config.lmsrKeyMeta,
+        })
+      : new EmptyInventorySource();
   } else {
     inventory = new EmptyInventorySource();
+  }
+
+  // ── spot feed (independent of inventory) ──────────────────────────────────
+  let feed: BinanceWsSpotFeed | null = null;
+  let getSpot: () => Promise<number | null>;
+  if (config.spotSource === 'ws') {
+    feed = new BinanceWsSpotFeed(config.symbol, config.binanceWsBase, config.feedStaleMs);
+    feed.start();
+    console.log(`[hedging] spot feed: Binance WebSocket (${config.symbol})`);
+    getSpot = async () => feed!.latest();
+  } else if (redis) {
+    const r = redis;
+    console.log(`[hedging] spot feed: Redis ${config.spotRedisKey}`);
+    getSpot = async () => {
+      try {
+        const raw = await r.getRaw(config.spotRedisKey);
+        if (!raw) return null;
+        const v = JSON.parse(raw);
+        return typeof v?.price === 'number' ? v.price : (typeof v === 'number' ? v : null);
+      } catch { return null; }
+    };
+  } else {
     getSpot = async () => null;
   }
 
@@ -92,6 +98,7 @@ async function main() {
   const shutdown = async () => {
     console.log('[hedging] shutting down…');
     loop.stop();
+    feed?.stop();
     if (config.flattenOnShutdown) {
       const mark = loop.state.spot ?? (await venue.getMarkPrice().catch(() => 0));
       if (mark > 0) {
