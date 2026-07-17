@@ -49,6 +49,11 @@ export const config = {
   // an external oracle-feed, e.g. the local stack).
   spotSource: (env.SPOT_SOURCE ?? 'ws') as 'ws' | 'redis',
   binanceWsBase: env.BINANCE_WS_BASE ?? 'wss://stream.binance.com:9443',
+  // Public futures mark-price WS host (read-only). Opt-in: set to
+  // 'wss://fstream.binance.com' where Binance futures streams are reachable.
+  // Empty (default) = REST mark via /fapi/v1/premiumIndex. The mark is off the
+  // hot path (the loop hedges on the SPOT WS); this only affects getMarkPrice.
+  futuresWsBase: env.FUTURES_WS_BASE ?? '',
   feedStaleMs: parseInt(env.FEED_STALE_MS ?? '15000', 10),
 
   // ── execution venue ───────────────────────────────────────────────────────

@@ -4,6 +4,7 @@
 // ever talk to a demo host.
 import crypto from 'node:crypto';
 import { assertPaper } from '../config.js';
+import { BinanceWsPriceFeed } from '../feed/binance-ws.js';
 import type { ExecutionVenue, OrderResult, Side, VenueFilters } from './types.js';
 
 export interface BinanceDemoOpts {
@@ -11,6 +12,8 @@ export interface BinanceDemoOpts {
   apiSecret: string;
   futuresBase: string; // e.g. https://demo-fapi.binance.com
   symbol: string;
+  // Public futures mark-price WS host (read-only price, no keys). Empty = REST only.
+  markWsBase?: string; // e.g. wss://fstream.binance.com
 }
 
 interface FullFilters extends VenueFilters {
@@ -21,11 +24,17 @@ export class BinanceDemoVenue implements ExecutionVenue {
   readonly name = 'binance-demo';
   private opts: BinanceDemoOpts;
   private filtersCache: FullFilters | null = null;
+  private markFeed: BinanceWsPriceFeed | null = null;
 
   constructor(opts: BinanceDemoOpts) {
     // defense in depth: refuse a production host even if config were bypassed.
     assertPaper(opts.futuresBase, 'FUTURES_BASE');
     this.opts = opts;
+    // real-time mark over WS (public read); getMarkPrice falls back to REST.
+    if (opts.markWsBase) {
+      this.markFeed = new BinanceWsPriceFeed(opts.symbol, 'markPrice@1s', opts.markWsBase);
+      this.markFeed.start();
+    }
   }
 
   hasKeys(): boolean {
@@ -64,6 +73,8 @@ export class BinanceDemoVenue implements ExecutionVenue {
 
   // ── ExecutionVenue ─────────────────────────────────────────────────────────
   async getMarkPrice(): Promise<number> {
+    const ws = this.markFeed?.latest(); // real-time WS mark if fresh
+    if (ws) return ws;
     const r = await this.publicGet<{ markPrice: string }>('/fapi/v1/premiumIndex', { symbol: this.opts.symbol });
     return parseFloat(r.markPrice);
   }

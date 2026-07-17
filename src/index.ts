@@ -61,7 +61,7 @@ async function main() {
   // ── execution venue ───────────────────────────────────────────────────────
   let venue: ExecutionVenue;
   if (config.executionVenue === 'binance-demo') {
-    const bv = new BinanceDemoVenue({ apiKey: config.apiKey, apiSecret: config.apiSecret, futuresBase: config.futuresBase, symbol: config.symbol });
+    const bv = new BinanceDemoVenue({ apiKey: config.apiKey, apiSecret: config.apiSecret, futuresBase: config.futuresBase, symbol: config.symbol, markWsBase: config.futuresWsBase || undefined });
     if (!bv.hasKeys()) console.warn('[hedging] binance-demo has NO keys — observe-only (no orders will place)');
     await bv.prepare(config.leverage, config.multiAssets); // leverage + multi-assets margin
     // flatten any orphan position from a prior run before trading
