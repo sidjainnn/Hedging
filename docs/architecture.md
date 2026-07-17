@@ -45,12 +45,18 @@ offsetting perp position so a BTC move doesn't move the book's expected settleme
 - A hard read-only boundary — no sim, no A/B venue, no research code in the runtime path.
 - Interfaces at every external edge → demo→prod is swapping an implementation, not editing logic.
 
-## The delta, precisely
-For one market: the house holds `qYes` YES and `qNo` NO shares of a binary that pays on
-`S_T ≥ K`. Its expected settlement value moves with spot at rate `dp/dS` (the digital delta,
-`core/digital.ts`). Net exposure `(qYes − qNo)·dp/dS` in BTC-equivalent units. Summed across
-live feed-3 markets on the hedge symbol → `aggregateDelta`. The hedge holds `−aggregateDelta`
-… i.e. the venue target is `aggregateDelta` (long if positive) so P&L offsets.
+## The delta, precisely (and why the hedge is +δ)
+For one market: users hold `qYes` YES / `qNo` NO shares of a binary paying on `S_T ≥ K`; the
+house (market maker) is **short** those outstanding shares. The digital's fair value moves with
+spot at rate `dp/dS` (`core/digital.ts`), so the house's value moves at
+`d(house)/dS = −(qYes − qNo)·dp/dS` — i.e. if users are net-long YES (`qYes > qNo`), the house
+**loses** when spot rises.
+
+To offset, the hedge needs `d(hedge)/dS = +(qYes − qNo)·dp/dS`. A LONG perp of size `N` has
+`d/dS = +N`, so `N = (qYes − qNo)·dp/dS`. Summed across live feed-3 markets → `aggregateDelta`,
+and the venue target is **`+aggregateDelta`** (LONG when positive). A $1 spot rise then gains on
+the perp exactly what the house loses on the book → net ≈ 0. (Confirmed live: users buy NO ⇒
+house long YES ⇒ δ<0 ⇒ SHORT hedge.)
 
 ## What this does NOT hedge
 Terminal gamma / pin risk at expiry — a perp cannot cover the digital's discontinuous payoff
