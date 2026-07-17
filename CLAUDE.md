@@ -55,6 +55,7 @@ with `INVENTORY_SOURCE=empty` it boots and reports an idle loop with no dependen
 - [docs/ops-runbook.md](docs/ops-runbook.md) — control plane, kill-switch, alerts.
 - [docs/deploy.md](docs/deploy.md) — Docker/compose, secrets, staging checklist, platform ask.
 - [docs/qa-environment.md](docs/qa-environment.md) — test strategy: levels, environments, techniques, traceability.
+- [docs/qa-test-cases.md](docs/qa-test-cases.md) — formal spec of all 30 tests (ID, objective, input, expected, req).
 - [docs/qa-plan.md](docs/qa-plan.md) — coverage + explicit list of what is NOT covered.
 - [docs/paras-ask.md](docs/paras-ask.md) — status & asks for the platform lead.
 

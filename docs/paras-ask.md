@@ -1,88 +1,73 @@
 # Crypto hedging — status & asks (for Paras)
 
 ## TL;DR
-I built the crypto perp-hedging system end-to-end and validated it against your real
-services locally. It's containerized and tested. To move to your QA/staging I need three
-decisions confirmed, one small platform change, and read-only VPC access. Details below.
+I built the crypto perp-hedging system end-to-end, validated its internals hard, and traced it
+against your **real `feat/lmsr` code**. It's containerized and tested. To finish, I need one
+inventory detail confirmed, three quick decisions, one small platform change, and read-only
+access. Nothing touches real money or prod at any step.
 
 ---
 
-## What I found in the repos (context for the asks)
-- **Production is a CLOB + house-MMP, not an AMM.** Verified across all 54 repos — liquidity
-  is the MMP quoting off the SkillPoll feed and matching complementary bids. No AMM anywhere.
-- **No crypto markets exist yet.** The engine supports non-sports (`feedId=3`), but there are
-  no live crypto markets — this vertical has to be built. (This is, I assume, why the project
-  came to me.)
-- **Your market metadata has no strike/expiry/underlying.** Risk today is managed via
-  `maxLoss` caps. A perp hedge needs those fields — that's the one platform ask below.
+## What I found in the repos
+- **Production is a CLOB + house-MMP, not an AMM** — verified across all 54 repos.
+- **No crypto markets exist yet, and the LMSR code isn't in prod.** The MMP/LMSR code lives only
+  on `feat/lmsr` (and `QA`) — `PRE`/`main` don't have it. So this vertical is genuinely still to
+  be shipped.
+- **Market metadata has no strike/expiry/underlying** (risk managed via `maxLoss` caps today) — a
+  perp hedge needs those (platform ask B).
 
 ## What's done
-- **`gb-crypto-hedging-service`** — a standalone, read-only perp-hedging sidecar (TS + Fastify).
-  It reads the house's net LMSR inventory from Redis, computes the aggregate BTC settlement-value
-  delta, and neutralizes it on a **demo/paper** perp venue. **It never writes your stores or
-  touches the order path.** Mainnet venues are hard-blocked; secrets live only in env.
-- **Proven end-to-end locally** against your *real, unmodified* trading-api, matching engine,
-  and distribution engine (driven through their existing interfaces — no repo changes): market →
-  house liquidity → match → settle → payout, with the hedge tracking house inventory live.
-- **Containerized** (health-checked image, control plane: metrics, runtime config, kill-switch)
-  and covered by an adversarial test suite.
-
-## Production risks I found and fixed while hardening it
-Flagging these because they're the kind of thing that only bites at your scale:
-1. **A naive Redis `KEYS` scan** would have blocked your shared Redis on every poll — replaced
-   with reading the active-markets set (non-blocking). *(See ask #2.)*
-2. **An unpaginated DynamoDB Scan** would have silently under-hedged past ~a few thousand bids —
-   fixed to paginate.
-3. **A NaN/Infinity delta** from a bad feed/value could have mis-sized the hedge — guarded.
-
-I also ran your existing Jest suites honestly: the matcher's own tests are **56 failed / 134
-passed** (stale — your CI runs SonarQube only, never the tests, so they've drifted). Not a
-production problem, but it means those tests aren't a safety net; I wrote our own instead.
+- **`gb-crypto-hedging-service`** — standalone, read-only perp-hedging sidecar (TS + Fastify).
+  Reads the house's LMSR inventory from Redis → aggregate BTC settlement-value delta → neutralizes
+  on a **demo/paper** perp. **Never writes your stores or touches the order path.** Mainnet
+  hard-blocked; secrets only in env. Containerized with health checks, metrics, and a kill-switch.
+- **Traced against your real `feat/lmsr` `lmsrHelper`**: confirmed `MMP_LMSR_QUANTITY_YES/NO` are
+  the LMSR pricing state, so my hedge reads the right signal and the **direction is correct**.
+- **Hardened**: fixed three scale bugs before they could bite —
+  (1) a Redis `KEYS` scan that would have blocked your shared Redis every poll (now reads the
+  active-markets set); (2) an unpaginated DynamoDB Scan that would silently under-hedge past a few
+  thousand bids; (3) a NaN/Infinity delta from a bad feed. Plus a 30-test adversarial suite.
+- *(FYI, honest:* your own Jest suites are stale — `feat/lmsr` matcher is 78 failed / 109 passed —
+  because CI runs SonarQube only, never the tests. Not a prod issue, but they aren't a safety net,
+  so I wrote our own.)
 
 ---
 
 ## What I need from you
 
-### A. Decisions (quick confirmations)
-1. **Approach:** build the crypto vertical on the existing **MMP** (house quotes + this hedge
-   sidecar), not a new AMM. Confirm?
-2. **Hedge instrument:** perps hedge the continuous delta but **cannot** cover the digital's
-   terminal/pin risk at expiry (proven in testing). Are we OK shipping perp-only first, with an
-   options overlay as a later phase?
-3. **Scope of first deploy:** read-only observe mode in QA first (no orders), then demo-perp.
+### 1. Confirm FIRST — LMSR inventory scaling (the source is already confirmed)
+`MMP_LMSR_QUANTITY_YES/NO_{marketId}` are the right keys and `(qYes−qNo)·dp/dS` gives the correct
+hedge **direction**. Three things affect hedge **size** — please confirm:
+- **Units:** `q` is incremented by `bidCount × bidAmount` (notional cents; `b = volatility = 500`
+  is calibrated to that). Should the hedge use `q` raw, or convert to share-count exposure?
+- **Cumulative vs net:** nothing decrements these keys in any `feat/lmsr` repo. Is there a
+  sell/settlement path that should, or are 5-min markets effectively buy-only (cumulative ≈ net)?
+- **Seed:** `startOption1Q/startOption2Q` pre-loads `q` (synthetic liquidity, not real risk) — I
+  plan to subtract it before hedging. Correct?
 
-### 0. Confirm FIRST — LMSR inventory scaling (source already confirmed)
-I traced `feat/lmsr` `lmsrHelper.getLMSRPrice`: `MMP_LMSR_QUANTITY_YES/NO_{marketId}` ARE the LMSR
-pricing state, so they're the right inventory signal and my `(qYes−qNo)·dp/dS` gives the correct
-hedge *direction*. Three things affect hedge *size* — please confirm:
-1. **Units:** these are incremented by `bidCount × bidAmount` (notional cents; `b=volatility=500`
-   calibrated to it). Should the hedge use `q` raw, or convert to share-count exposure (×payout)?
-2. **Cumulative vs net:** nothing decrements these keys in any repo — is there any sell/settlement
-   path that should, or are 5-min markets effectively buy-only (so cumulative ≈ net)?
-3. **Seed:** `startOption1Q/startOption2Q` pre-loads `q` — that's synthetic liquidity, not real
-   house risk, so I plan to subtract it before hedging. Correct?
+### 2. Quick decisions
+- **Approach:** build the crypto vertical on the existing **MMP** + this hedge sidecar, not a new
+  AMM. Confirm?
+- **Instrument:** perps hedge the continuous delta but **can't** cover the digital's terminal/pin
+  risk at expiry (proven). OK to ship perp-only first, options overlay later?
+- **First deploy:** read-only *observe* mode in QA (no orders) → then demo-perp.
 
-### B. One platform change
-4. **Publish `MMP_MARKET_META_{marketId}`** for `feedId=3` markets — a small JSON blob
-   `{ underlyingSymbol, strike, expiryTs, feedId }` in predictor Redis. It's the only thing the
-   hedger needs that the MMP doesn't already write. Everything else is read from keys you already
-   maintain.
-5. **Confirm `predictor_active_markets` is the authoritative live-market index in prod.** My
-   scalable read path iterates that set. If liveness is tracked differently in prod, point me at
-   the right index.
+### 3. One platform change
+- **Publish `MMP_MARKET_META_{marketId}`** for `feedId=3` markets — a small JSON blob
+  `{ underlyingSymbol, strike, expiryTs, feedId }` in predictor Redis. The only thing the hedger
+  needs that the MMP doesn't already write.
+- **Confirm `predictor_active_markets` is the authoritative live-market index in prod** (my
+  scalable read path iterates it; if liveness is tracked differently, point me at the right index).
 
-### C. Access (read-only)
-6. **Read-only access to QA Redis** (`qa-redis.…ap-south-1.cache.amazonaws.com`). It's
-   VPC-internal, so I'll need either the service deployed **inside the VPC** (same subnet/SG), a
-   bastion, or a read-replica endpoint — your call on the safest path.
-7. **A Binance demo/testnet API key** (futures-trade scope only, no withdrawal) for the paper
-   hedge venue — or confirm you want me to use my own demo account.
-8. **PR sign-off** when we're ready: the sidecar needs zero changes to your repos; the only PRs
-   are the crypto market pieces + the `MMP_MARKET_META` publish (item 4).
+### 4. Access (read-only)
+- **Read-only QA Redis** (`qa-redis.…ap-south-1.cache.amazonaws.com`) — it's VPC-internal, so the
+  service runs **inside the VPC**, or via a bastion / read-replica (your call on the safest path).
+- **A Binance demo/testnet key** (futures-trade scope, no withdrawal) — or confirm I use my own.
+- **PR sign-off** when ready: the sidecar needs zero changes to your repos; the only PRs are the
+  crypto market pieces + the `MMP_MARKET_META` publish.
 
 ---
 
 ## Suggested path
 Observe-only in QA (read real inventory, place nothing) → validate the delta against real flow →
-demo-perp with the kill-switch → costed A/B (needs a join with your settlement P&L) → review.
-Nothing touches real money or production at any step.
+demo-perp with the kill-switch → costed A/B (join with your settlement P&L) → review.
