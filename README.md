@@ -5,6 +5,11 @@ owns a directional bet on Bitcoin it never chose. This service watches that
 inventory and holds an offsetting perpetual-futures position, so a move in BTC
 doesn't move the book's expected settlement.
 
+### ▶ [Open the live replay dashboard →](https://sidjainnn.github.io/Hedging/)
+
+Watch the real pipeline decide: house delta, the hedge that offsets it, and the
+gate standing down when it shouldn't trade.
+
 It **never writes to any exchange data store**. It reads inventory, computes an
 aggregate delta, and trades only its own hedge account. Mainnet is hard-blocked at
 construction; `dry-run` is the default venue.
