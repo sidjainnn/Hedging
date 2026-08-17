@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hedging — perp delta hedging for binary-option inventory</title>
+<meta name="description" content="A read-only sidecar that neutralises the directional BTC exposure a prediction-market house accumulates. Replay of the real inventory to gate to hedger pipeline.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🛡️</text></svg>">
+<style>
+  :root{--bg:#0e1116;--panel:#151a21;--ink:#e8eaed;--muted:#98a1ad;--line:#242b34;
+        --accent:#3987e5;--warm:#d95926;--good:#199e70;--dim:#6b7684}
+  @media (prefers-color-scheme: light){
+    :root{--bg:#fcfcfb;--panel:#fff;--ink:#15181d;--muted:#5f6772;--line:#e6e6e4;
+          --accent:#2a78d6;--warm:#eb6834;--good:#1baf7a;--dim:#8b939e}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+  header{padding:56px 0 28px}
+  h1{font-size:clamp(26px,4vw,38px);margin:0 0 12px;letter-spacing:-.02em}
+  .lede{color:var(--muted);max-width:68ch;margin:0}
+  .badge{display:inline-block;font-size:12px;padding:4px 10px;border-radius:999px;
+    border:1px solid var(--line);color:var(--muted);margin-bottom:14px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:26px 0}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .v{font-size:22px;font-weight:650;margin-top:3px;font-variant-numeric:tabular-nums}
+  .d{font-size:12.5px;color:var(--muted)}
+  .pos{color:var(--good)} .neg{color:var(--warm)}
+  .chart{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0}
+  .chart h3{margin:0 0 2px;font-size:14px}
+  .chart .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  canvas{width:100%;height:auto;display:block}
+  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 16px;
+    font-size:14px;font-weight:600;cursor:pointer}
+  input[type=range]{flex:1;min-width:200px;accent-color:var(--accent)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:8px}
+  .legend i{display:inline-block;width:11px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  section{padding:32px 0;border-top:1px solid var(--line)}
+  h2{font-size:21px;margin:0 0 8px}
+  p{max-width:70ch;color:var(--ink)}
+  .note{border-left:3px solid var(--warm);padding-left:15px;color:var(--muted);max-width:70ch}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:16px 0;display:block;overflow-x:auto}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  a{color:var(--accent)}
+  footer{padding:40px 0 64px;color:var(--muted);font-size:13.5px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <div class="badge">replay · real pipeline, synthetic house book</div>
+  <h1>Perp delta hedging for binary-option inventory</h1>
+  <p class="lede">When users buy YES on a 5-minute BTC binary, the house is short YES —
+  and owns a directional bet on Bitcoin it never chose. This sidecar reads that
+  inventory read-only, computes an aggregate delta, and holds an offsetting perp
+  position. Below is its real decision path replayed over real Binance 1-second data.</p>
+</div></header>
+
+<div class="wrap">
+  <div class="tiles" id="tiles"></div>
+
+  <div class="controls">
+    <button id="play">❚❚ Pause</button>
+    <input type="range" id="scrub" min="0" value="0">
+    <span class="d" id="clock"></span>
+  </div>
+
+  <div class="chart">
+    <h3>BTC spot vs the market's strike</h3>
+    <p class="sub">A fresh at-the-money market opens every 5 minutes; the strike steps at each roll.</p>
+    <canvas id="c1" width="1000" height="200"></canvas>
+    <div class="legend"><span><i style="background:var(--accent)"></i>BTC spot</span>
+      <span><i style="background:var(--dim)"></i>strike</span></div>
+  </div>
+
+  <div class="chart">
+    <h3>House delta vs the hedge that offsets it</h3>
+    <p class="sub">The hedge tracks house exposure only while the gate is armed — the shaded
+    bands are ticks where it deliberately stands down.</p>
+    <canvas id="c2" width="1000" height="220"></canvas>
+    <div class="legend"><span><i style="background:var(--warm)"></i>house delta (BTC)</span>
+      <span><i style="background:var(--good)"></i>hedge position (BTC)</span>
+      <span><i style="background:var(--line)"></i>gate idle</span></div>
+  </div>
+</div>
+
+<section><div class="wrap">
+  <h2>Why it stands down more than it trades</h2>
+  <p>A hedge that fires on every wobble pays fees for nothing. Two gates must both
+  open before a single order is placed — realised volatility has to breach a
+  threshold <em>and</em> exposure has to clear an inventory floor. In this replay the
+  hedger is armed for roughly a third of ticks; the rest of the time
+  <code>idleReason</code> names which gate is holding it back.</p>
+  <p class="note">The book here is generated — no live exchange is reachable from a
+  static page. Everything acting on it is the shipped code:
+  <code>GamebullInventorySource</code> → <code>Gate</code> → <code>Hedger</code> →
+  <code>DryRunVenue</code>, over real Binance 1-second klines. Regenerate with
+  <code>npx tsx scripts/demo-timeline.ts</code>.</p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>What a perp can and cannot do</h2>
+  <p>A perpetual future is linear — Γ ≡ 0 by definition. A digital's value near expiry
+  is a <em>step</em>, its delta diverging as <code>φ(d)/(Sσ√τ)</code>. No linear
+  instrument replicates a discontinuity, and an A/B confirmed it: the worst-case
+  window went <strong>−$94.5 → −$94.5</strong>, a difference of exactly 0.0.</p>
+  <p>So the service does the job a perp <em>can</em> do — hedge delta — and does it
+  well: <strong>33–37% of P&amp;L dispersion removed</strong>, worst case
+  <strong>−$115 → +$85/+$109</strong>. Terminal gamma is handled in quoting instead.</p>
+  <table>
+    <tr><th>Bug found</th><th>Fix</th></tr>
+    <tr><td><code>KEYS</code> scan of the whole Redis keyspace each poll — O(N) and blocking</td><td>read the active-markets set; <code>keys</code> removed from the interface entirely</td></tr>
+    <tr><td>Contract inventory reported under delta's name — a <strong>$66.8M "skew"</strong> on ~$1,000 of flow</td><td><code>netContracts</code> and <code>delta</code> split, with distinct units</td></tr>
+    <tr><td>Delta diverging as τ→0 demanded ~60 BTC on a book needing 3.5</td><td>τ floor + expiry lockout — under-report rather than chase an unfillable hedge</td></tr>
+    <tr><td>Sized on Black–Scholes while the exchange quoted an empirical curve</td><td>differentiate the curve you actually quote on; up to 11× over-hedge at low vol</td></tr>
+  </table>
+</div></section>
+
+<footer><div class="wrap">
+  <a href="https://github.com/sidjainnn/Hedging">Source</a> ·
+  <a href="https://github.com/sidjainnn/Prediction-Market-Platform">the exchange it hedges</a> ·
+  <a href="https://github.com/sidjainnn/AMM_Hedging">the research simulator</a><br>
+  51 tests passing · dry-run by default · mainnet hard-blocked · no real money.
+</div></footer>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (x,d=2) => x.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+let P=[], i=0, playing=true;
+
+function tiles(p){
+  const armed = p.armed;
+  const reason = {'idle-vol':'vol too low','idle-inv':'exposure below floor','armed':'hedging','disabled':'disabled'}[p.idleReason]||p.idleReason;
+  document.getElementById('tiles').innerHTML = [
+    ['BTC spot', '$'+fmt(p.spot,1), 'strike $'+fmt(p.strike,0)],
+    ['House delta', fmt(p.delta,4)+' BTC', '$'+fmt(p.notionalUsdt,0)+' notional'],
+    ['Net contracts', (p.netContractsYes>0?'+':'')+p.netContractsYes, 'signed lean, YES'],
+    ['Gate', armed?'ARMED':'IDLE', reason],
+    ['Hedge position', fmt(p.position,4)+' BTC', 'dry-run venue'],
+    ['Hedge P&L', (p.hedgePnl>=0?'+$':'-$')+fmt(Math.abs(p.hedgePnl),2), 'since start'],
+  ].map(([k,v,d],n)=>{
+    const cls = n===5 ? (p.hedgePnl>=0?'pos':'neg') : (n===3 ? (armed?'pos':'') : '');
+    return `<div class="tile"><div class="k">${k}</div><div class="v ${cls}">${v}</div><div class="d">${d}</div></div>`;
+  }).join('');
+  document.getElementById('clock').textContent =
+    `t+${String(Math.floor(i/60)).padStart(2,'0')}:${String(i%60).padStart(2,'0')} · ${i+1}/${P.length} ticks`;
+}
+
+function line(ctx,pts,W,H,min,max,color,width){
+  ctx.beginPath(); ctx.lineWidth=width; ctx.strokeStyle=color; ctx.lineJoin='round';
+  const span=(max-min)||1;
+  pts.forEach((v,n)=>{ const x=n/(pts.length-1)*W, y=H-((v-min)/span)*H;
+    n?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+}
+
+function draw(){
+  const upto = P.slice(0, i+1);
+  // chart 1 — spot vs strike
+  const c1=document.getElementById('c1'), x1=c1.getContext('2d');
+  const W=c1.width,H=c1.height; x1.clearRect(0,0,W,H);
+  const sp=upto.map(p=>p.spot), st=upto.map(p=>p.strike).filter(v=>v>0);
+  const lo=Math.min(...sp,...st), hi=Math.max(...sp,...st), pad=(hi-lo)*0.15||1;
+  line(x1,upto.map(p=>p.strike),W,H,lo-pad,hi+pad,css('--dim'),1.5);
+  line(x1,sp,W,H,lo-pad,hi+pad,css('--accent'),2);
+
+  // chart 2 — delta vs hedge, with idle bands
+  const c2=document.getElementById('c2'), x2=c2.getContext('2d');
+  const W2=c2.width,H2=c2.height; x2.clearRect(0,0,W2,H2);
+  x2.fillStyle=css('--line');
+  upto.forEach((p,n)=>{ if(!p.armed) x2.fillRect(n/(P.length-1)*W2,0,Math.ceil(W2/P.length)+1,H2); });
+  const dv=upto.map(p=>p.delta), pv=upto.map(p=>p.position);
+  const m=Math.max(0.02,...dv.map(Math.abs),...pv.map(Math.abs))*1.15;
+  x2.strokeStyle=css('--muted'); x2.lineWidth=1; x2.beginPath();
+  x2.moveTo(0,H2/2); x2.lineTo(W2,H2/2); x2.stroke();
+  line(x2,dv,W2,H2,-m,m,css('--warm'),2);
+  line(x2,pv,W2,H2,-m,m,css('--good'),2);
+
+  tiles(P[i]);
+  document.getElementById('scrub').value=i;
+}
+
+fetch('timeline.json').then(r=>r.json()).then(d=>{
+  P=d.points; document.getElementById('scrub').max=P.length-1; draw();
+  setInterval(()=>{ if(playing){ i=(i+1)%P.length; draw(); } },50);
+});
+document.getElementById('play').onclick=e=>{
+  playing=!playing; e.target.textContent=playing?'❚❚ Pause':'▶ Play';
+};
+document.getElementById('scrub').oninput=e=>{ i=+e.target.value; playing=false;
+  document.getElementById('play').textContent='▶ Play'; draw(); };
+</script>
+</body>
+</html>

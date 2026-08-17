@@ -1,0 +1,47 @@
+name: Deploy demo to GitHub Pages
+
+# Publishes site/ — a replay dashboard for the hedging pipeline.
+#
+# The service itself is a backend that reads house inventory from a Redis only
+# reachable inside the exchange's network, so a hosted instance would show an
+# empty book forever. Instead, scripts/demo-timeline.ts drives the REAL
+# inventory -> gate -> hedger path over real Binance 1s klines against a
+# generated book, and the page replays that timeline. site/timeline.json is
+# committed so the published page is reproducible and needs no build step.
+#
+# NOTE: Pages must be enabled once by hand — Settings -> Pages -> Source ->
+# "GitHub Actions". The workflow token cannot enable it itself.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p site/images && cp docs/images/* site/images/ || true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
