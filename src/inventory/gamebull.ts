@@ -5,6 +5,7 @@
 // See docs/inventory-contract.md for the exact keys/shapes.
 
 import { digitalProb } from '../core/digital.js';
+import { empiricalDigital } from '../core/empirical.js';
 import type { AggregateInventory, HedgeableMarket, InventorySource, MarketMeta, RedisLike } from './types.js';
 
 export interface GamebullSourceOpts {
@@ -14,7 +15,33 @@ export interface GamebullSourceOpts {
   keyYes: string;
   keyNo: string;
   keyMeta: string;
+  // ── gamma-wall guards ────────────────────────────────────────────────────
+  // A digital's dp/dS diverges as τ→0 at the strike: the same book that needs
+  // 3.5 BTC of hedge at τ=300s demands 60 BTC at τ=1s. That delta is real maths
+  // but it is NOT tradeable — you cannot buy 88 BTC in the last second, and
+  // trying just burns fees against a position that is about to resolve itself.
+  // minTauSec floors τ in the delta calc so exposure stays finite; below
+  // expiryLockoutSec we stop counting the market at all and let it settle.
+  // Optional: omitting them falls back to the defaults below rather than
+  // producing NaN deltas, which would silently skip EVERY market and disable
+  // hedging with no error anywhere.
+  minTauSec?: number;
+  expiryLockoutSec?: number;
+  // ── which curve sizes the hedge ──────────────────────────────────────────
+  // 'empirical' (default) differentiates the SAME curve the exchange quotes on
+  // (empiricalProbYes). 'bs' uses the Black-Scholes digital delta.
+  //
+  // This defaults to 'empirical' because 'bs' was measurably WRONG: the exchange
+  // has quoted off the empirical curve since that curve replaced Black-Scholes,
+  // but this service kept sizing off the BS derivative, over-hedging by ~1.6-2.2x
+  // (3.15x at the money) against how quotes actually move. See core/empirical.ts
+  // for the measurement table. 'bs' is retained ONLY as a rollback path.
+  deltaCurve?: 'empirical' | 'bs';
 }
+
+export const DEFAULT_MIN_TAU_SEC = 60;
+export const DEFAULT_EXPIRY_LOCKOUT_SEC = 20;
+export const DEFAULT_DELTA_CURVE: 'empirical' | 'bs' = 'empirical';
 
 // A finite, safe number or 0 — guards against NaN/Infinity from a malformed key
 // poisoning the aggregate (which would silently disable OR blow up the hedge).
@@ -34,6 +61,8 @@ export class GamebullInventorySource implements InventorySource {
     const marketIds = await this.redis.smembers(o.activeMarketsKey);
     const markets: HedgeableMarket[] = [];
     let aggregateDelta = 0;
+    let netContractsYes = 0;   // Σ(qYes−qNo) — signed inventory lean, in contracts
+    let grossContracts = 0;    // Σ|qYes−qNo| — how much lean is offsetting vs additive
     let skipped = 0;
 
     for (const marketId of marketIds) {
@@ -43,23 +72,58 @@ export class GamebullInventorySource implements InventorySource {
         continue;
       }
       const tauSec = (meta.expiryTs - nowTs) / 1000;
-      if (tauSec <= 0) {
+      // Expiry lockout: inside the final seconds the position resolves itself.
+      // Chasing its (diverging) delta can only lose fees on a hedge that has no
+      // time left to pay off.
+      const lockoutSec = Number.isFinite(o.expiryLockoutSec as number) ? (o.expiryLockoutSec as number) : DEFAULT_EXPIRY_LOCKOUT_SEC;
+      if (tauSec <= lockoutSec) {
         skipped++;
         continue;
       }
       const qYes = safeNum(await this.redis.get(`${o.keyYes}${marketId}`));
       const qNo = safeNum(await this.redis.get(`${o.keyNo}${marketId}`));
-      const { dpdS } = digitalProb(spot, meta.strike, sigmaPerSec, tauSec);
-      const delta = (qYes - qNo) * dpdS;
-      if (!Number.isFinite(delta)) {
+      // Floor τ for the delta only. Past this point dp/dS is a mathematical
+      // fiction — unhedgeable terminal gamma — so we deliberately under-report
+      // rather than demand a hedge that cannot be executed.
+      const minTau = Number.isFinite(o.minTauSec as number) ? (o.minTauSec as number) : DEFAULT_MIN_TAU_SEC;
+      const tauForDelta = Math.max(tauSec, minTau);
+      // Size the hedge off the curve the exchange actually QUOTES on. Using the
+      // Black-Scholes derivative here while quoting empirical hedges a
+      // sensitivity the book does not have — see core/empirical.ts.
+      const curve = o.deltaCurve ?? DEFAULT_DELTA_CURVE;
+      const { dpdS, d2pdS2 } = curve === 'bs'
+        ? digitalProb(spot, meta.strike, sigmaPerSec, tauForDelta)
+        : empiricalDigital(spot, meta.strike, sigmaPerSec, tauForDelta);
+      // Signed contract inventory. This — not the dollar delta — is what "skew"
+      // means to the desk: which side the book is leaning. Delta is how much
+      // that lean COSTS per $1 of BTC; the two are different quantities and
+      // conflating them under one label is a reporting bug, not a maths one.
+      const netContracts = qYes - qNo;
+      const delta = netContracts * dpdS;
+      // Same τ floor as delta, same rationale (comment above): past the floor,
+      // gamma is a mathematical fiction (unhedgeable terminal risk), so this is
+      // a deliberate under-report, not a bug — Phase 0's analysis needs a
+      // finite recorded series, not Infinity, right where it matters most.
+      const gamma = netContracts * d2pdS2;
+      if (!Number.isFinite(delta) || !Number.isFinite(gamma)) {
         skipped++;
         continue;
       }
       aggregateDelta += delta;
-      markets.push({ marketId, underlyingSymbol: meta.underlyingSymbol, strike: meta.strike, expiryTs: meta.expiryTs, qYes, qNo, delta });
+      netContractsYes += netContracts;
+      grossContracts += Math.abs(netContracts);
+      markets.push({ marketId, underlyingSymbol: meta.underlyingSymbol, strike: meta.strike, expiryTs: meta.expiryTs, qYes, qNo, netContracts, delta, gamma });
     }
 
-    return { aggregateDelta, notionalUsdt: Math.abs(aggregateDelta) * spot, markets, skipped };
+    return {
+      aggregateDelta,
+      notionalUsdt: Math.abs(aggregateDelta) * spot,
+      netContractsYes,
+      grossContracts,
+      deltaCurve: o.deltaCurve ?? DEFAULT_DELTA_CURVE,
+      markets,
+      skipped,
+    };
   }
 
   private async readMeta(marketId: string): Promise<MarketMeta | null> {
@@ -79,7 +143,12 @@ export class GamebullInventorySource implements InventorySource {
 export class EmptyInventorySource implements InventorySource {
   readonly name = 'empty';
   async poll(): Promise<AggregateInventory> {
-    return { aggregateDelta: 0, notionalUsdt: 0, markets: [], skipped: 0 };
+    return {
+      aggregateDelta: 0, notionalUsdt: 0,
+      netContractsYes: 0, grossContracts: 0,
+      deltaCurve: DEFAULT_DELTA_CURVE,
+      markets: [], skipped: 0,
+    };
   }
 }
 

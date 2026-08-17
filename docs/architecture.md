@@ -6,6 +6,21 @@ crypto (feed-3) binary markets. The house (MMP) takes the other side of user flo
 of that inventory has a settlement-value delta w.r.t. BTC spot. This service holds an
 offsetting perp position so a BTC move doesn't move the book's expected settlement.
 
+## Spot price — NOT from GameBull's Redis by default
+
+**Correction worth reading before the diagram below.** `SPOT_SOURCE` defaults to
+**`ws`**: the service runs its **own** self-reconnecting Binance WebSocket feed
+(`feed/binance-ws.ts`, with a staleness watchdog), *not* GameBull's
+`CRYPTO_SPOT_BTCUSDT` Redis key. `SPOT_SOURCE=redis` is an alternative mode, not
+the default.
+
+This is deliberate. The hedger commits real money, so it must not inherit a stale
+or wedged exchange feed, and must keep working if the exchange's Redis is
+unavailable. The cost is a second WebSocket connection and the possibility of
+momentary disagreement between the price the exchange quotes on and the price the
+hedger sizes against. The exchange's own feed (`oracle-feed` in `gb-crypto-local`)
+is a separate connection with a separate purpose.
+
 ## Data flow
 ```
 ┌─ GameBull side (read-only) ──────────────┐     ┌─ hedging service ─────────────────────┐
@@ -13,7 +28,8 @@ offsetting perp position so a BTC move doesn't move the book's expected settleme
 │   MMP_LMSR_QUANTITY_YES_{mkt}  ──────────┼────▶│ GamebullInventorySource.poll()        │
 │   MMP_LMSR_QUANTITY_NO_{mkt}             │     │   for each feed-3 market on SYMBOL:   │
 │   MMP_MARKET_META_{mkt} {strike,expiry}  │     │     δ_i = (qYes−qNo)·dp/dS            │
-│   CRYPTO_SPOT_BTCUSDT  (spot)  ──────────┼────▶│   aggregateDelta = Σ δ_i             │
+│                                          │     │     Γ_i = (qYes−qNo)·d²p/dS²          │
+│   CRYPTO_SPOT_BTCUSDT  (optional only)   │     │   aggregateDelta = Σ δ_i             │
 └──────────────────────────────────────────┘     │            │                          │
                                                   │            ▼                          │
                                                   │  Gate.update(vol, notional)           │

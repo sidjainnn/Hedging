@@ -31,6 +31,7 @@ async function main() {
   const inv = new GamebullInventorySource(redis, {
     symbol: 'BTCUSDT', hedgeableFeedIds: [3], activeMarketsKey: 'predictor_active_markets',
     keyYes: 'MMP_LMSR_QUANTITY_YES_', keyNo: 'MMP_LMSR_QUANTITY_NO_', keyMeta: 'MMP_MARKET_META_',
+    minTauSec: 60, expiryLockoutSec: 20,
   });
   const agg = await inv.poll(SPOT, SIGMA_PER_SEC, now);
   console.log('inventory:', JSON.stringify(agg, null, 1));

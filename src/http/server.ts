@@ -55,6 +55,7 @@ function metrics(loop: Loop): string {
   m('hedging_fees_paid', 'cumulative est fees USDT', s.hedger.feesPaid);
   m('hedging_fill_count', 'cumulative fills', s.hedger.fillCount);
   m('hedging_has_error', 'hedger error present (1/0)', s.hedger.lastError ? 1 : 0);
+  m('hedging_skew_offset_pct', 'liquidity skew offset by hedging, dollar-offset ratio since last reset (0-1)', s.skewOffsetPct);
   return lines.join('\n') + '\n';
 }
 
@@ -76,6 +77,21 @@ export function buildServer(deps: ControlDeps) {
   });
 
   app.get('/report', async () => deps.ledger?.report() ?? { windows: 0 });
+
+  // Clear cumulative hedge stats (P&L, fees, fills) so a new trading round
+  // starts from zero. The live position is left alone — flattening is the
+  // separate kill path — but avgEntry is re-anchored to the current mark so a
+  // still-open position doesn't report phantom unrealised P&L afterwards.
+  app.post('/reset', async () => {
+    const before = {
+      hedgePnl: loop.state.hedger.hedgePnl, feesPaid: loop.state.hedger.feesPaid, fillCount: loop.state.hedger.fillCount,
+      skewOffsetPct: loop.state.skewOffsetPct,
+    };
+    hedger.resetStats(loop.state.spot ?? undefined);
+    loop.resetSkewStats();
+    deps.ledger?.reset?.();
+    return { ok: true, cleared: before, livePosition: hedger.livePosition };
+  });
 
   app.get('/metrics', async (_req, reply) => {
     reply.header('Content-Type', 'text/plain; version=0.0.4');

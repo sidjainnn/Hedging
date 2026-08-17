@@ -73,12 +73,41 @@ test('BVA market count: 0 → flat, 1 → one, 2 → sums, no crash at any count
 });
 
 // ── Expiry boundary: τ at exactly 0 vs 1ms left ──────────────────────────────
-test('BVA expiry: expiryTs==now (τ=0) skipped, 1ms left hedged', async () => {
+test('BVA expiry lockout: inside the window skipped, outside it hedged', async () => {
+  const LOCKOUT = 20;
   const mk = (expiryTs: number) => {
     const store = { Y_m: '100', N_m: '0', M_m: JSON.stringify({ underlyingSymbol: 'BTCUSDT', strike: 63000, expiryTs, feedId: 3 }) } as Record<string, string>;
     const redis: RedisLike = { get: async (k) => store[k] ?? null, smembers: async () => ['m'] };
-    return new GamebullInventorySource(redis, { symbol: 'BTCUSDT', hedgeableFeedIds: [3], activeMarketsKey: 'a', keyYes: 'Y_', keyNo: 'N_', keyMeta: 'M_' });
+    return new GamebullInventorySource(redis, {
+      symbol: 'BTCUSDT', hedgeableFeedIds: [3], activeMarketsKey: 'a', keyYes: 'Y_', keyNo: 'N_', keyMeta: 'M_',
+      minTauSec: 60, expiryLockoutSec: LOCKOUT,
+    });
   };
-  assert.equal((await mk(NOW).poll(63000, 4e-5, NOW)).markets.length, 0, 'τ=0 skipped (tauSec<=0)');
-  assert.equal((await mk(NOW + 1).poll(63000, 4e-5, NOW)).markets.length, 1, '1ms left: hedged');
+  // Previously "1ms left" was hedged. That is the gamma wall: dp/dS diverges as
+  // τ→0, so a ~4k-contract book demanded ~88 BTC ($5.8M) of hedge in the final
+  // second — rejected by the venue and pointless anyway, since the position
+  // settles moments later. Inside the lockout we deliberately stop hedging.
+  assert.equal((await mk(NOW).poll(63000, 4e-5, NOW)).markets.length, 0, 'τ=0 skipped');
+  assert.equal((await mk(NOW + 1).poll(63000, 4e-5, NOW)).markets.length, 0, '1ms left: inside lockout, skipped');
+  assert.equal((await mk(NOW + LOCKOUT * 1000).poll(63000, 4e-5, NOW)).markets.length, 0, 'exactly at lockout: skipped');
+  assert.equal((await mk(NOW + (LOCKOUT + 1) * 1000).poll(63000, 4e-5, NOW)).markets.length, 1, 'just outside lockout: hedged');
+});
+
+test('gamma wall: delta stays bounded as τ→0 (τ floored for the delta calc)', async () => {
+  const mk = (expiryTs: number) => {
+    const store = { Y_m: '4000', N_m: '0', M_m: JSON.stringify({ underlyingSymbol: 'BTCUSDT', strike: 63000, expiryTs, feedId: 3 }) } as Record<string, string>;
+    const redis: RedisLike = { get: async (k) => store[k] ?? null, smembers: async () => ['m'] };
+    return new GamebullInventorySource(redis, {
+      symbol: 'BTCUSDT', hedgeableFeedIds: [3], activeMarketsKey: 'a', keyYes: 'Y_', keyNo: 'N_', keyMeta: 'M_',
+      minTauSec: 60, expiryLockoutSec: 20,
+    });
+  };
+  // ATM, 4000 contracts: unfloored this explodes (60+ BTC at τ=1s). Floored at
+  // 60s it must stay at the τ=60s value no matter how little time is left.
+  const at300 = (await mk(NOW + 300_000).poll(63000, 4e-5, NOW)).aggregateDelta;
+  const at60 = (await mk(NOW + 60_000).poll(63000, 4e-5, NOW)).aggregateDelta;
+  const at21 = (await mk(NOW + 21_000).poll(63000, 4e-5, NOW)).aggregateDelta;
+  assert.ok(Number.isFinite(at21), 'delta finite near expiry');
+  assert.ok(at21 > at300, 'delta still grows as expiry nears (up to the floor)');
+  assert.ok(Math.abs(at21 - at60) < 1e-9, 'delta clamped at the τ-floor value, not diverging');
 });

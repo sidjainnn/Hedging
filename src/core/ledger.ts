@@ -3,7 +3,7 @@
 // fixed clock boundary (default 5min, matching the markets' tenor). The book's
 // vig/settlement P&L lives on the exchange (distribution engine); a full
 // hedged-vs-unhedged A/B joins this ledger with that settlement per window.
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 
 export const LEDGER_COLUMNS = [
@@ -124,6 +124,25 @@ export class ServiceLedger {
       try {
         appendFileSync(this.csv, LEDGER_COLUMNS.map((c) => row[c]).join(',') + '\n');
       } catch { /* disk went away — keep in memory */ }
+    }
+  }
+
+  // Drop all history and start a fresh window — the per-round counterpart to
+  // Hedger.resetStats(). The CSV is archived rather than deleted so a prior
+  // round's data is still recoverable for analysis.
+  reset(): void {
+    this.rowsMem.length = 0;
+    this.idx = -1; this.startTs = 0; this.ticks = 0; this.armedTicks = 0;
+    this.exposureSum = 0; this.exposureMax = 0; this.volSum = 0; this.base = null;
+    if (!this.persist) return;
+    try {
+      if (existsSync(this.csv)) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+        renameSync(this.csv, this.csv.replace(/\.csv$/, `-${stamp}.csv`));
+      }
+      appendFileSync(this.csv, LEDGER_COLUMNS.join(',') + '\n');
+    } catch (e) {
+      console.warn(`[ledger] reset could not rotate csv (${String(e).slice(0, 60)})`);
     }
   }
 

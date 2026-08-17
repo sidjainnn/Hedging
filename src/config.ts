@@ -43,6 +43,17 @@ export const config = {
   lmsrKeyYes: env.MMP_LMSR_KEY_YES ?? 'MMP_LMSR_QUANTITY_YES_',
   lmsrKeyNo: env.MMP_LMSR_KEY_NO ?? 'MMP_LMSR_QUANTITY_NO_',
   lmsrKeyMeta: env.MMP_MARKET_META_KEY ?? 'MMP_MARKET_META_',
+  // Which curve sizes the hedge. 'empirical' (default) differentiates the curve
+  // the exchange actually quotes on; 'bs' is the legacy Black-Scholes delta,
+  // retained only as a rollback. See src/core/empirical.ts for why the default
+  // changed — 'bs' over-hedged by 1.6-2.2x against observed quote moves.
+  deltaCurve: (env.DELTA_CURVE ?? 'empirical') as 'empirical' | 'bs',
+  // Gamma-wall guards (see GamebullSourceOpts). A 5m binary's dp/dS diverges as
+  // τ→0: with ~4k contracts the book demanded 88 BTC / $5.8M of hedge at τ≈1s,
+  // which the venue rejected outright. Floor τ at 60s for the delta and ignore
+  // markets in their last 20s — mirroring the quoting side's expiry lockout.
+  hedgeMinTauSec: parseFloat(env.HEDGE_MIN_TAU_SEC ?? '60'),
+  hedgeExpiryLockoutSec: parseFloat(env.HEDGE_EXPIRY_LOCKOUT_SEC ?? '20'),
   spotRedisKey: env.SPOT_REDIS_KEY ?? 'CRYPTO_SPOT_BTCUSDT',
   // Spot feed source: 'ws' = the service's own Binance WebSocket (real-time,
   // self-sufficient — default); 'redis' = read CRYPTO_SPOT_* from Redis (fed by
@@ -76,7 +87,63 @@ export const config = {
   hedgeGatePctl: parseFloat(env.HEDGE_GATE_PCTL ?? '0.6'),
   hedgeNotionalUsdt: parseFloat(env.HEDGE_NOTIONAL_USDT ?? '80'),
   maxNotionalUsdt: parseFloat(env.MAX_NOTIONAL_USDT ?? '10000'),
-  hedgeDeadbandUsdt: parseFloat(env.HEDGE_DEADBAND_USDT ?? '75'),
+  // Fraction of aggregate delta actually hedged. 1.0 = full delta (current
+  // behaviour, and the default so this ships inert).
+  //
+  // Why this lever exists: hedge FEES scale with perp notional while REVENUE
+  // scales with binary notional, and the two differ by ~300x. Measured over
+  // 38,875 real BTC 5-minute windows, the most a 3c spread can fund is
+  // f = 0.125 on taker fees or f = 0.250 on maker — beyond that the hedge
+  // costs more than the spread earns. Break-even f by spread and fee model:
+  //
+  //     spread   taker    maker
+  //       1c     0.042    0.083
+  //       3c     0.125    0.250
+  //       6c     0.250    0.500
+  //      10c     0.417    0.833
+  //
+  // Risk removed is close to LINEAR in f (26% at f=1.0, ~12% at f=0.3), so
+  // there is no free "sweet spot" — this is a straight purchase of variance
+  // reduction, and the table above is what the spread can afford.
+  hedgeFraction: Math.max(0, Math.min(1, parseFloat(env.HEDGE_FRACTION ?? '1'))),
+  // Post the hedge (maker, ~half the taker fee) before crossing. OFF by
+  // default: this changes the money path. Roughly DOUBLES the hedge fraction a
+  // given spread can fund — at a 3c spread, f=0.125 taker vs f=0.250 maker.
+  // Unfilled remainder is completed by crossing within the same reconcile, so
+  // enabling this never leaves the hedge short of target.
+  preferMaker: (env.PREFER_MAKER ?? '0') === '1',
+  // How long a post-only order rests before we give up and cross.
+  //
+  // Measured on 32,400 real 1-second BTC bars, a resting order at the touch
+  // fills only ~12% of the time within 1s and ~31% within 5s — far less often
+  // than the maker path's first justification assumed. Missing is also ADVERSELY
+  // SELECTED: fills happen when price comes to us, misses when it runs away, so
+  // a miss leaves us crossing at a worse price. Net expected value per hedge:
+  //
+  //     1s  fill 12.0%  net +$0.27
+  //     3s  fill 23.6%  net +$0.48
+  //     5s  fill 30.8%  net +$0.59
+  //    30s  fill 62.2%  net +$1.00
+  //
+  // Positive at every horizon, but small — the honest figure is well under a
+  // dollar per hedge, not the $3.00 a naive "maker saves 3bps" reading gives.
+  // Longer is better on the MEAN, but the wait is time spent UNHEDGED, and that
+  // variance is the thing the hedge exists to remove; do not read the 30s row
+  // as a recommendation. 5s is a deliberate compromise, and it must stay
+  // comfortably below HEDGE_INTERVAL_SEC or successive cycles would post
+  // overlapping orders against each other (clamped below).
+  makerTimeoutMs: parseInt(env.MAKER_TIMEOUT_MS ?? '5000', 10),
+  // Deadband now TAPERS with time-to-expiry of the nearest active market
+  // (src/core/taper.ts) instead of being one flat number for the whole
+  // market life: tight (HEDGE_DEADBAND_USDT, kept as the "tight" name for
+  // continuity) far from expiry, where gamma is small and a real signal is
+  // cheap to react to — loosening toward HEDGE_DEADBAND_LOOSE_USDT as the
+  // gamma wall approaches, where chasing small moves is mostly fee churn on
+  // a position about to resolve itself. REF_SEC matches the quoting side's
+  // 5-minute market tenor (gb-crypto-local drivers/lib/quoting.mjs REF_SEC).
+  hedgeDeadbandUsdt: parseFloat(env.HEDGE_DEADBAND_USDT ?? '125'),
+  hedgeDeadbandLooseUsdt: parseFloat(env.HEDGE_DEADBAND_LOOSE_USDT ?? '400'),
+  hedgeDeadbandRefSec: parseFloat(env.HEDGE_DEADBAND_REF_SEC ?? '300'),
   // On SIGTERM/SIGINT: flatten the position (leave no unmonitored perp) or hold it
   // (keep the book hedged across a restart). Default HOLD — a brief restart
   // shouldn't churn the hedge; set true for environments where an unwatched

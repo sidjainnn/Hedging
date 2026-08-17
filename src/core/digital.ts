@@ -17,6 +17,7 @@ function normPdf(x: number): number {
 export interface Digital {
   p: number; // P(S_T ≥ K) under GBM drift 0
   dpdS: number; // digital delta dp/dS
+  d2pdS2: number; // digital gamma d²p/dS²
 }
 
 // sigmaPerSec = per-second vol, tauSec = seconds to expiry.
@@ -25,7 +26,7 @@ export function digitalProb(spot: number, strike: number, sigmaPerSec: number, t
   // neutral p and ZERO delta rather than NaN/Infinity, so a bad feed can never
   // poison the aggregate or size a garbage hedge.
   if (!(spot > 0) || !(strike > 0) || !Number.isFinite(spot) || !Number.isFinite(strike)) {
-    return { p: 0.5, dpdS: 0 };
+    return { p: 0.5, dpdS: 0, d2pdS2: 0 };
   }
   const tau = Math.max(tauSec, 1e-9);
   const vol = Math.max(sigmaPerSec, 1e-12);
@@ -33,5 +34,14 @@ export function digitalProb(spot: number, strike: number, sigmaPerSec: number, t
   const d = (Math.log(spot / strike) - 0.5 * vol * vol * tau) / denom;
   const p = Math.min(0.999999, Math.max(1e-6, normCdf(d)));
   const dpdS = normPdf(d) / (spot * denom);
-  return { p, dpdS: Number.isFinite(dpdS) ? dpdS : 0 };
+  // d1 = d2 + σ√τ in standard BS notation (this file's `d` is d2, `denom` is σ√τ).
+  // Γ = -φ(d2)·d1 / (S²σ²τ) is the textbook form; this file's `d`/`p` convention
+  // has the opposite overall sign baked in already (see dpdS above, which is
+  // +φ(d)/(Sσ√τ) rather than the textbook -φ(d1)/(Sσ√τ) for a PUT), so gamma
+  // is derived directly from dpdS by differentiating it w.r.t. spot rather than
+  // copied from a textbook formula with an assumed sign — verified against the
+  // known odd-around-strike shape in digital.test.ts, not assumed.
+  const d1 = d + denom;
+  const d2pdS2 = -normPdf(d) * d1 / (spot * spot * vol * vol * tau);
+  return { p, dpdS: Number.isFinite(dpdS) ? dpdS : 0, d2pdS2: Number.isFinite(d2pdS2) ? d2pdS2 : 0 };
 }

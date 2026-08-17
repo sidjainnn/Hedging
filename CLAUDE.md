@@ -11,7 +11,11 @@ deployable runtime.
 
 ## Golden rules
 1. **Read-only against GameBull.** We only READ Redis keys (`MMP_LMSR_QUANTITY_*`,
-   `MMP_MARKET_META_*`, spot). We never write their stores or call their write paths.
+   `MMP_MARKET_META_*`). We never write their stores or call their write paths.
+   *(Spot is NOT read from their Redis by default — `SPOT_SOURCE=ws` runs our own
+   Binance WebSocket feed, so the hedger cannot inherit a stale or wedged exchange
+   feed while committing real money. `SPOT_SOURCE=redis` is an alternative mode.
+   See `docs/architecture.md`.)*
 2. **Demo/paper only.** Mainnet Binance hosts are hard-blocked at config load
    (`src/config.ts`). The service refuses to start if pointed at a real-money venue.
 3. **Secrets only in `.env`** (gitignored). Never commit keys. `.env.example` documents

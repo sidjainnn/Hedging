@@ -9,6 +9,7 @@ import { Gate } from './core/gate.js';
 import { Hedger } from './core/hedger.js';
 import { Loop } from './loop.js';
 import { ServiceLedger } from './core/ledger.js';
+import { ExposureRecorder } from './core/exposure-recorder.js';
 import { BinanceWsSpotFeed } from './feed/binance-ws.js';
 import { buildServer } from './http/server.js';
 
@@ -29,6 +30,8 @@ async function main() {
       ? new GamebullInventorySource(redis, {
           symbol: config.symbol, hedgeableFeedIds: config.hedgeableFeedIds, activeMarketsKey: config.activeMarketsKey,
           keyYes: config.lmsrKeyYes, keyNo: config.lmsrKeyNo, keyMeta: config.lmsrKeyMeta,
+          minTauSec: config.hedgeMinTauSec, expiryLockoutSec: config.hedgeExpiryLockoutSec,
+          deltaCurve: config.deltaCurve,
         })
       : new EmptyInventorySource();
   } else {
@@ -81,13 +84,24 @@ async function main() {
     volGate: config.hedgeVolGate, volThreshold: config.hedgeVolThreshold, volHysteresis: config.hedgeVolHysteresis,
     mode: config.hedgeGateMode, notionalFloor: config.hedgeNotionalUsdt, pctl: config.hedgeGatePctl,
   });
-  const hedger = new Hedger(venue, { maxNotionalUsdt: config.maxNotionalUsdt, deadbandUsdt: config.hedgeDeadbandUsdt }, config.hedgeEnabled);
+  const hedger = new Hedger(venue, { maxNotionalUsdt: config.maxNotionalUsdt, deadbandUsdt: config.hedgeDeadbandUsdt, preferMaker: config.preferMaker,
+    // Hard cap at half the hedge loop interval: a timeout longer than the
+    // loop would leave one cycle's resting order still live when the next
+    // cycle posts, so the two would compete on the same book.
+    makerTimeoutMs: Math.min(config.makerTimeoutMs, config.hedgeIntervalSec * 500) }, config.hedgeEnabled);
 
   const ledger = new ServiceLedger(config.ledgerWindowMs);
+  // Phase 0 feasibility instrumentation only (cross-market-hedging-research-plan.md) —
+  // off unless explicitly requested, no effect on gate/hedger/quoting behavior either way.
+  const exposureRecorder = process.env.RECORD_EXPOSURE === 'true' ? new ExposureRecorder() : undefined;
+  if (exposureRecorder) console.log('[hedging] RECORD_EXPOSURE=true — writing per-market exposure/gamma series to data/exposure.csv');
   const loop = new Loop({
-    inventory, venue, gate, hedger, getSpot,
+    inventory, venue, gate, hedger, getSpot, exposureRecorder,
     intervalSec: config.hedgeIntervalSec, volWindow: config.hedgeVolWindow,
     minSigmaPerSec: config.minSigmaPerSec, ledger,
+    deadbandTightUsdt: config.hedgeDeadbandUsdt, deadbandLooseUsdt: config.hedgeDeadbandLooseUsdt,
+    hedgeFraction: config.hedgeFraction,
+    deadbandRefSec: config.hedgeDeadbandRefSec,
   });
   loop.start();
 
